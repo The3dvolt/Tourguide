@@ -22,42 +22,51 @@ interface LocationContext {
 }
 
 export default function TourGuidePage() {
+  // State Management
   const [location, setLocation] = useState<{lat: number, lon: number} | null>(null);
   const [heading, setHeading] = useState(0);
   const [pois, setPois] = useState<POI[]>([]);
   const [locationContext, setLocationContext] = useState<LocationContext | null>(null);
   const [isNarrating, setIsNarrating] = useState(false);
   const [currentNarration, setCurrentNarration] = useState('');
-  const [interests, setInterests] = useState(['history', 'architecture', 'culture', 'news']);
+  const [interests] = useState(['history', 'architecture', 'local news', 'culture']);
   const [radius, setRadius] = useState(500);
   const [autoMode, setAutoMode] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(false); // Voice Toggle
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [error, setError] = useState('');
-  const [debugInfo, setDebugInfo] = useState('');
+  const [debugInfo, setDebugInfo] = useState('Initializing...');
   
-  const audioRef = useRef<HTMLAudioElement>(null);
   const lastNarrationTime = useRef(0);
 
-  // --- Voice Synthesis Function ---
+  // --- iOS VOICE FIX: Unlock Speech Engine ---
+  // On iOS, speech must be "primed" by a direct user gesture.
+  const unlockVoice = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      const utterance = new SpeechSynthesisUtterance('');
+      utterance.volume = 0;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
   const speakText = (text: string) => {
     if (!voiceEnabled || !window.speechSynthesis) return;
-    
-    // Stop any current speech
+
+    // Cancel any ongoing speech
     window.speechSynthesis.cancel();
-    
+
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95; // Natural speed
+    utterance.rate = 0.9; // Professional tour guide pace
     utterance.pitch = 1.0;
     
-    // Optional: Select a specific voice (English/French based on location)
+    // Attempt to find a natural sounding voice
     const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Female'));
-    if (preferredVoice) utterance.voice = preferredVoice;
+    const premiumVoice = voices.find(v => v.localService && v.name.includes('Google')) || voices[0];
+    if (premiumVoice) utterance.voice = premiumVoice;
 
     window.speechSynthesis.speak(utterance);
   };
 
-  // Request location permission
+  // --- Geolocation Tracking ---
   useEffect(() => {
     if (!navigator.geolocation) {
       setError('Geolocation not supported');
@@ -79,219 +88,216 @@ export default function TourGuidePage() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
   
-  // Track device heading
+  // --- Heading / Compass Tracking ---
   useEffect(() => {
     const handleOrientation = (event: DeviceOrientationEvent) => {
       if (event.alpha !== null) setHeading(event.alpha);
     };
+    
+    // Handle iOS orientation permissions
+    if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
+      (DeviceOrientationEvent as any).requestPermission();
+    }
+    
     window.addEventListener('deviceorientation', handleOrientation);
     return () => window.removeEventListener('deviceorientation', handleOrientation);
   }, []);
   
-  // Discover nearby context (Street, City, POIs)
+  // --- Discovery API (Street/City/POI context) ---
   useEffect(() => {
     if (!location) return;
     
-    const discoverPOIs = async () => {
+    const discover = async () => {
       try {
-        setDebugInfo(`Consulting local records for ${location.lat.toFixed(3)}...`);
+        setDebugInfo('Syncing with local archives...');
         const response = await fetch('/api/discover', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            lat: location.lat,
-            lon: location.lon,
-            radius,
-            interests
-          })
+          body: JSON.stringify({ lat: location.lat, lon: location.lon, radius })
         });
         
         const data = await response.json();
         setPois(data.pois || []);
         setLocationContext(data.locationContext || null);
-        
-        if (data.locationContext) {
-          setDebugInfo(`Located: ${data.locationContext.street}, ${data.locationContext.city}`);
-        }
+        setDebugInfo(data.locationContext ? `At: ${data.locationContext.street}` : 'Scanning...');
       } catch (err) {
-        setDebugInfo('Discovery sync failed');
+        setDebugInfo('Discovery offline');
       }
     };
     
-    discoverPOIs();
-    const interval = setInterval(discoverPOIs, 30000);
+    discover();
+    const interval = setInterval(discover, 30000);
     return () => clearInterval(interval);
-  }, [location, radius, interests]);
+  }, [location, radius]);
   
-  // Auto-narration trigger
-  useEffect(() => {
-    if (!autoMode || isNarrating) return;
-    const now = Date.now();
-    if (now - lastNarrationTime.current > 20000) {
-      narrate();
-    }
-  }, [autoMode, isNarrating, locationContext]);
-
-  // Generate and play narration
+  // --- Narration Logic ---
   const narrate = async () => {
     if (isNarrating) return;
     
+    // CRITICAL: Unlock voice immediately on user click (for iPhone)
+    if (voiceEnabled) unlockVoice();
+
     setIsNarrating(true);
-    setCurrentNarration('🔍 Searching historical archives and news...');
+    setCurrentNarration('🔍 Consulting history for this location...');
     lastNarrationTime.current = Date.now();
     
     try {
-      const narrationResponse = await fetch('/api/narrate', {
+      const response = await fetch('/api/narrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           pois,
-          locationContext, // Sending Street/City/Province to AI
-          location,
-          heading,
-          interests
+          locationContext, // Hierarchical context: Street -> City -> Province
+          interests 
         }),
       });
       
-      const data = await narrationResponse.json();
+      const data = await response.json();
       
       if (data.text) {
         setCurrentNarration(data.text);
-        speakText(data.text); // Trigger the Voice Narration
+        // Delay slightly for mobile Safari stability
+        setTimeout(() => speakText(data.text), 100);
       }
     } catch (err) {
-      setCurrentNarration('I am observing the surroundings. The history of this region is quite fascinating...');
+      setCurrentNarration("I'm looking into the rich history of this region. Every corner has a story...");
     } finally {
       setIsNarrating(false);
     }
   };
 
+  // --- UI ---
   return (
-    <div className="flex flex-col min-h-screen bg-slate-900 text-white font-sans">
-      <header className="p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 flex justify-between items-center">
+    <div className="flex flex-col min-h-screen bg-[#0f172a] text-white font-sans selection:bg-blue-500/30">
+      {/* Header */}
+      <header className="p-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur-lg sticky top-0 z-50 flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-            3D Volt Tour Guide
+          <h1 className="text-xl font-black tracking-tighter bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent uppercase">
+            3D Volt Tour
           </h1>
-          <p className="text-[10px] text-slate-400 uppercase tracking-widest">{debugInfo}</p>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{debugInfo}</p>
         </div>
         
         <button 
           onClick={() => {
             setVoiceEnabled(!voiceEnabled);
-            if (voiceEnabled) window.speechSynthesis.cancel();
+            if (!voiceEnabled) unlockVoice();
+            else window.speechSynthesis.cancel();
           }}
-          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border ${
+          className={`px-4 py-2 rounded-full text-[10px] font-black tracking-widest transition-all ${
             voiceEnabled 
-              ? 'bg-green-500/20 border-green-500 text-green-400' 
-              : 'bg-slate-800 border-slate-700 text-slate-400'
+              ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
+              : 'bg-slate-800 text-slate-400 grayscale'
           }`}
         >
           {voiceEnabled ? '🔊 VOICE ON' : '🔇 VOICE OFF'}
         </button>
       </header>
 
-      <main className="flex-1 p-4 space-y-4 max-w-2xl mx-auto w-full">
+      <main className="flex-1 p-5 space-y-6 max-w-xl mx-auto w-full">
         {error && (
-          <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-lg text-red-400 text-sm">
-            ⚠️ {error}
+          <div className="bg-red-500/20 border border-red-500/50 p-3 rounded-xl text-red-400 text-xs text-center">
+            {error}
           </div>
         )}
 
-        {/* Location Display */}
-        <section className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 shadow-xl">
-          <div className="flex justify-between items-start">
-            <div>
-              <h2 className="text-sm font-bold text-slate-500 uppercase">Current Address</h2>
-              <p className="text-lg font-medium text-slate-200">
-                {locationContext?.street || 'Scanning Street...'}
+        {/* Address Card */}
+        <section className="bg-gradient-to-br from-slate-800 to-slate-900 p-5 rounded-3xl border border-slate-700/50 shadow-2xl">
+          <div className="flex justify-between items-center">
+            <div className="space-y-1">
+              <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Current Sector</h2>
+              <p className="text-xl font-bold text-white truncate max-w-[200px]">
+                {locationContext?.street || 'Detecting Street...'}
               </p>
-              <p className="text-sm text-blue-400">
+              <p className="text-sm text-blue-400 font-medium">
                 {locationContext?.city}, {locationContext?.state}
               </p>
             </div>
-            <div className="bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-700 text-center">
-              <span className="text-[10px] text-slate-500 block">HEADING</span>
-              <span className="text-lg font-mono font-bold text-emerald-400">{Math.round(heading)}°</span>
+            <div className="bg-black/40 p-3 rounded-2xl border border-white/5 text-center min-w-[70px]">
+              <span className="text-[9px] text-slate-500 block font-bold">COMPASS</span>
+              <span className="text-xl font-mono font-black text-blue-400">{Math.round(heading)}°</span>
             </div>
           </div>
         </section>
 
-        {/* Narration Display */}
-        <section className="relative">
-          <div className={`transition-all duration-500 bg-blue-600/10 rounded-2xl border ${isNarrating ? 'border-blue-500/50 animate-pulse' : 'border-blue-500/30'} p-5 shadow-2xl shadow-blue-500/5`}>
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`w-2 h-2 rounded-full ${isNarrating ? 'bg-blue-400' : 'bg-slate-600'}`} />
-              <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest">Guide Narration</h3>
+        {/* AI Story Box */}
+        <section className="relative group">
+          <div className={`transition-all duration-700 rounded-3xl p-6 border ${
+            isNarrating ? 'bg-blue-600/10 border-blue-500 shadow-blue-500/20' : 'bg-slate-800/40 border-slate-700'
+          } shadow-2xl`}>
+            <div className="flex items-center gap-2 mb-4">
+              <span className={`flex h-2 w-2 rounded-full ${isNarrating ? 'bg-blue-400 animate-ping' : 'bg-slate-600'}`}></span>
+              <h3 className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Local Knowledge</h3>
             </div>
-            <p className="text-lg leading-relaxed text-slate-200 min-h-[100px]">
-              {currentNarration || "Stand near a landmark or click 'Narrate' to hear about this area's secrets."}
+            <p className="text-lg leading-relaxed font-medium text-slate-200 italic">
+              "{currentNarration || `I'm ready to tell you about the secrets of ${locationContext?.city || 'this area'}. Press Narrate to begin.`}"
             </p>
           </div>
         </section>
 
-        {/* Action Controls */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Main Controls */}
+        <div className="grid grid-cols-2 gap-4">
           <button 
             onClick={() => setAutoMode(!autoMode)}
-            className={`py-4 rounded-2xl font-bold text-sm transition-all border ${
+            className={`py-4 rounded-2xl font-black text-[11px] tracking-widest transition-all ${
               autoMode 
-                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-lg shadow-emerald-500/10' 
-                : 'bg-slate-800 border-slate-700 text-slate-400'
+                ? 'bg-emerald-500 text-white shadow-xl shadow-emerald-500/20' 
+                : 'bg-slate-800 text-slate-500 border border-slate-700'
             }`}
           >
-            {autoMode ? 'AUTO MODE: ON' : 'AUTO MODE: OFF'}
+            {autoMode ? 'AUTO: ACTIVE' : 'AUTO: OFF'}
           </button>
           <button 
             onClick={narrate}
             disabled={isNarrating}
-            className="py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 rounded-2xl font-bold text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+            className="py-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-2xl font-black text-[11px] tracking-widest shadow-xl shadow-blue-600/30 active:scale-95 transition-transform"
           >
-            {isNarrating ? 'CONSULTING...' : 'NARRATE NOW'}
+            {isNarrating ? 'SYNCING...' : 'NARRATE NOW'}
           </button>
         </div>
 
-        {/* POI List */}
+        {/* Discovery Feed */}
         <section className="pt-4">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Markers in sector</h3>
-            <span className="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded-full border border-slate-700">
-              {pois.length} FOUND
-            </span>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nearby Signatures</h3>
+            <div className="h-[1px] flex-1 mx-4 bg-slate-800"></div>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {pois.length > 0 ? (
-              pois.slice(0, 5).map((poi) => (
-                <div key={poi.id} className="bg-slate-800/30 p-3 rounded-xl border border-slate-700/30 flex justify-between items-center group hover:bg-slate-800/50 transition-colors">
+              pois.slice(0, 3).map((poi) => (
+                <div key={poi.id} className="bg-slate-800/30 p-4 rounded-2xl border border-slate-700/30 flex justify-between items-center">
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-200">{poi.name}</h4>
-                    <p className="text-[10px] text-slate-500 capitalize">{poi.type.replace('_', ' ')}</p>
+                    <h4 className="text-sm font-bold text-slate-300">{poi.name}</h4>
+                    <p className="text-[10px] text-slate-500 uppercase font-bold">{poi.type}</p>
                   </div>
-                  <div className="text-[10px] font-mono text-blue-400 bg-blue-400/5 px-2 py-1 rounded-md border border-blue-400/20">
+                  <div className="text-xs font-mono font-bold text-blue-400">
                     {Math.round(poi.distance)}m
                   </div>
                 </div>
               ))
             ) : (
-              <div className="text-center py-8 border-2 border-dashed border-slate-800 rounded-2xl">
-                <p className="text-slate-600 text-sm italic">Broadening search to street & city level...</p>
+              <div className="py-10 text-center border-2 border-dashed border-slate-800 rounded-3xl">
+                <p className="text-xs text-slate-600 font-bold uppercase tracking-tighter">
+                  No landmarks. Using street-level archives.
+                </p>
               </div>
             )}
           </div>
         </section>
       </main>
 
-      <footer className="p-6 bg-slate-950/50 border-t border-slate-800">
-        <div className="max-w-2xl mx-auto flex flex-col gap-4">
+      {/* Footer Settings */}
+      <footer className="p-8 bg-black/40 border-t border-slate-800 mt-auto">
+        <div className="max-w-xl mx-auto space-y-4">
           <div className="flex justify-between items-center">
-            <span className="text-xs font-medium text-slate-500 uppercase">Detection Radius</span>
-            <span className="text-xs font-bold text-blue-400">{radius}m</span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Radar Range</span>
+            <span className="text-xs font-mono font-bold text-blue-400">{radius}m</span>
           </div>
           <input 
-            type="range" min="100" max="2500" step="100" 
+            type="range" min="100" max="2000" step="100" 
             value={radius} 
             onChange={(e) => setRadius(parseInt(e.target.value))}
-            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
         </div>
       </footer>
