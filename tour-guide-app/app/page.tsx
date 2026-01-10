@@ -17,11 +17,11 @@ export default function TourGuidePage() {
   const [locationContext, setLocationContext] = useState<any>(null);
   const [currentNarration, setCurrentNarration] = useState('');
   const [isNarrating, setIsNarrating] = useState(false);
-  const [radius, setRadius] = useState(5000); // Default to max for better discovery
+  const [radius, setRadius] = useState(5000); 
   const [selectedModel, setSelectedModel] = useState("gemini-1.5-flash");
   const [userApiKey, setUserApiKey] = useState("");
   const [lastApiError, setLastApiError] = useState('');
-  const [appVersion] = useState("v1.8.0-stable");
+  const [appVersion] = useState("v1.8.5-stable");
 
   // --- Voice Engine State ---
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -37,15 +37,18 @@ export default function TourGuidePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- 2. Voice Initialization (Safari Fix) ---
+  // --- 2. Voice Initialization ---
   useEffect(() => {
     const updateVoices = () => {
       const allVoices = window.speechSynthesis.getVoices();
       if (allVoices.length > 0) {
+        // Filter for English or keep all for international support
         const enVoices = allVoices.filter(v => v.lang.startsWith('en'));
-        setVoices(enVoices);
-        if (!selectedVoiceURI && enVoices.length > 0) {
-          setSelectedVoiceURI(enVoices[0].voiceURI);
+        setVoices(enVoices.length > 0 ? enVoices : allVoices);
+        
+        // Auto-select first voice if none selected
+        if (!selectedVoiceURI && allVoices.length > 0) {
+          setSelectedVoiceURI(allVoices[0].voiceURI);
         }
       }
     };
@@ -86,7 +89,7 @@ export default function TourGuidePage() {
     if (isNarrating) return;
     setIsNarrating(true);
     setLastApiError('');
-    setCurrentNarration('Querying the historian...');
+    setCurrentNarration('Consulting the local archives...');
 
     try {
       const res = await fetch('/api/narrate', {
@@ -100,10 +103,10 @@ export default function TourGuidePage() {
         })
       });
 
-      // Safety: Check if response is JSON
+      // Robust JSON Check
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("Server error: Did not return JSON. Check API route.");
+        throw new Error("Server Error: Response was not JSON. Check API logs.");
       }
 
       const data = await res.json();
@@ -116,6 +119,8 @@ export default function TourGuidePage() {
       const utterance = new SpeechSynthesisUtterance(data.text);
       const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
       if (voice) utterance.voice = voice;
+      
+      // Mobile Safari Fix: Needs user gesture (which we have from the button click)
       window.speechSynthesis.speak(utterance);
 
     } catch (e: any) {
@@ -127,7 +132,7 @@ export default function TourGuidePage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-black text-white p-4 font-sans max-w-lg mx-auto selection:bg-blue-500/30">
+    <div className="flex flex-col min-h-screen bg-black text-white p-4 font-sans max-w-lg mx-auto">
       
       <header className="mb-6">
         <h1 className="font-black text-blue-500 text-2xl italic tracking-tighter uppercase">3D Volt Tour</h1>
@@ -145,36 +150,56 @@ export default function TourGuidePage() {
       {!isUnlocked ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <button 
-            onClick={() => setIsUnlocked(true)}
-            className="w-full py-8 bg-blue-600 rounded-[2.5rem] font-black text-xl shadow-2xl active:scale-95 transition-all"
+            onClick={() => {
+                setIsUnlocked(true);
+                // Trigger a silent utterance to "warm up" the speech engine on iOS
+                window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+            }}
+            className="w-full py-10 bg-blue-600 rounded-[2.5rem] font-black text-xl shadow-2xl active:scale-95 transition-all"
           >
-            UNLOCK TOUR 🔓
+            ACTIVATE SYSTEM ⚡
           </button>
-          <p className="mt-4 text-[10px] text-slate-500 uppercase tracking-widest font-bold">Tap to enable audio & GPS</p>
+          <p className="mt-6 text-[10px] text-slate-500 uppercase tracking-widest font-black opacity-50">Enable Audio & Neural Link</p>
         </div>
       ) : (
         <main className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
           
           {/* Settings Section */}
-          <section className="bg-slate-900/50 p-4 rounded-3xl border border-white/10 space-y-4">
-            <div>
-              <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block tracking-widest">AI Historian Brain</label>
-              <select 
-                value={selectedModel} 
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full bg-black border border-white/10 p-3 rounded-xl text-sm font-bold appearance-none outline-none focus:border-blue-500"
-              >
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast/Reliable)</option>
-                <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash (Exp)</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep History)</option>
-              </select>
+          <section className="bg-slate-900/50 p-4 rounded-3xl border border-white/10 space-y-4 shadow-inner">
+            <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block tracking-widest">AI Brain</label>
+                  <select 
+                    value={selectedModel} 
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full bg-black border border-white/10 p-3 rounded-xl text-xs font-bold appearance-none outline-none focus:border-blue-500"
+                  >
+                    <option value="gemini-1.5-flash">1.5 Flash (Stable)</option>
+                    <option value="gemini-2.0-flash-exp">2.0 Flash (Exp)</option>
+                    <option value="gemini-1.5-pro">1.5 Pro (Deep)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block tracking-widest">Voice Tone</label>
+                  <select 
+                    value={selectedVoiceURI} 
+                    onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                    className="w-full bg-black border border-white/10 p-3 rounded-xl text-xs font-bold appearance-none outline-none focus:border-blue-500"
+                  >
+                    {voices.map(voice => (
+                        <option key={voice.voiceURI} value={voice.voiceURI}>
+                            {voice.name.replace('Google', '').split(' ')[0]}
+                        </option>
+                    ))}
+                  </select>
+                </div>
             </div>
 
             <div>
-              <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block tracking-widest">Personal API Key (Optional)</label>
+              <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block tracking-widest">Personal API Key</label>
               <input 
                 type="password"
-                placeholder="Paste AIza... to use your own tokens"
+                placeholder="AIza... (Optional)"
                 value={userApiKey}
                 onChange={(e) => setUserApiKey(e.target.value)}
                 className="w-full bg-black border border-white/10 p-3 rounded-xl text-[10px] font-mono focus:border-blue-500 outline-none"
@@ -197,17 +222,17 @@ export default function TourGuidePage() {
           </section>
 
           {/* Narration Output */}
-          <section className={`p-6 rounded-[2.5rem] border-2 transition-all duration-700 min-h-[160px] flex flex-col justify-center ${isNarrating ? 'border-blue-500 bg-blue-500/5 shadow-lg shadow-blue-500/10' : 'border-white/5 bg-slate-950'}`}>
+          <section className={`p-6 rounded-[2.5rem] border-2 transition-all duration-700 min-h-[160px] flex flex-col justify-center ${isNarrating ? 'border-blue-500 bg-blue-500/5' : 'border-white/5 bg-slate-950 shadow-inner'}`}>
              <h3 className="text-[10px] font-black text-slate-600 uppercase mb-4 tracking-widest flex items-center gap-2">
                <div className={`w-2 h-2 rounded-full ${isNarrating ? 'bg-blue-500 animate-ping' : 'bg-slate-700'}`}></div>
-               Live Narration
+               Neural Uplink
              </h3>
              <p className="text-xl font-medium leading-relaxed text-slate-200">
-              {currentNarration || (locationContext ? `Ready to explore ${locationContext.street}.` : "Detecting your location...")}
+              {currentNarration || (locationContext ? `Standing by on ${locationContext.street}.` : "Calibrating sensors...")}
              </p>
              {lastApiError && (
-               <div className="mt-4 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-[9px] font-mono text-red-400 break-all">
-                 ERROR: {lastApiError}
+               <div className="mt-4 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-[9px] font-mono text-red-400 break-all leading-tight">
+                 SYSTEM_ERR: {lastApiError}
                </div>
              )}
           </section>
@@ -215,21 +240,23 @@ export default function TourGuidePage() {
           <button 
             onClick={handleNarrate} 
             disabled={isNarrating || !location} 
-            className="w-full py-7 bg-blue-600 rounded-[2.5rem] font-black text-lg tracking-widest shadow-2xl active:scale-95 transition-all disabled:bg-slate-800 disabled:text-slate-500"
+            className="w-full py-8 bg-blue-600 rounded-[2.5rem] font-black text-lg tracking-widest shadow-2xl active:scale-95 transition-all disabled:bg-slate-800 disabled:text-slate-500"
           >
-            {isNarrating ? 'CONSULTING AI...' : 'NARRATE NOW'}
+            {isNarrating ? 'DECRYPTING...' : 'NARRATE NOW'}
           </button>
 
-          {/* Landmark List Preview */}
+          {/* POI Feed */}
           {pois.length > 0 && (
-            <div className="pt-4 space-y-2">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">Nearby Landmarks</p>
-              {pois.slice(0, 3).map(poi => (
-                <div key={poi.id} className="bg-white/5 p-3 rounded-2xl border border-white/5 flex justify-between items-center">
-                  <span className="text-xs font-bold text-slate-300">{poi.name}</span>
-                  <span className="text-[9px] bg-blue-500/10 text-blue-400 px-2 py-1 rounded-md font-black uppercase">{poi.type}</span>
-                </div>
-              ))}
+            <div className="pt-2 space-y-2 opacity-80">
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-4">Nearby Data-Points</p>
+              <div className="grid grid-cols-1 gap-2">
+                {pois.slice(0, 3).map(poi => (
+                    <div key={poi.id} className="bg-white/5 p-3 rounded-2xl border border-white/5 flex justify-between items-center px-5">
+                    <span className="text-xs font-bold text-slate-300">{poi.name}</span>
+                    <span className="text-[8px] bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full font-black uppercase">{poi.type}</span>
+                    </div>
+                ))}
+              </div>
             </div>
           )}
         </main>
