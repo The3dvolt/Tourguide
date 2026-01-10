@@ -11,7 +11,7 @@ function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3; // Earth radius in meters
+  const R = 6371e3; 
   const φ1 = lat1 * Math.PI / 180;
   const φ2 = lat2 * Math.PI / 180;
   const Δφ = (lat2 - lat1) * Math.PI / 180;
@@ -37,21 +37,26 @@ export default function TourGuidePage() {
   
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- 1. Audio Setup ---
+  // --- 1. Audio Setup & Voice Loading ---
   useEffect(() => {
     const loadVoices = () => {
       const v = window.speechSynthesis.getVoices();
-      setVoices(v.filter(v => v.lang.startsWith('en')));
+      const engVoices = v.filter(v => v.lang.startsWith('en'));
+      setVoices(engVoices);
+      if (engVoices.length > 0 && !selectedVoiceURI) {
+        setSelectedVoiceURI(engVoices[0].voiceURI);
+      }
     };
     window.speechSynthesis.onvoiceschanged = loadVoices;
     loadVoices();
-  }, []);
+  }, [selectedVoiceURI]);
 
-  // --- 2. GPS & Compass Tracker ---
+  // --- 2. GPS & Compass Tracker (Gyro Movement) ---
   useEffect(() => {
     const handleOrientation = (e: any) => {
+      // Logic for iOS (webkitCompassHeading) vs Android (alpha)
       const compass = e.webkitCompassHeading || (360 - e.alpha);
-      if (compass) setHeading(compass);
+      if (compass !== undefined) setHeading(compass);
     };
     window.addEventListener('deviceorientation', handleOrientation, true);
 
@@ -59,7 +64,6 @@ export default function TourGuidePage() {
       const { latitude, longitude } = pos.coords;
       setLocation({ lat: latitude, lon: longitude });
 
-      // Update distance if POIs exist
       if (pois.length > 0) {
         const target = pois[0];
         const tLat = target.lat || target.center?.lat;
@@ -68,6 +72,7 @@ export default function TourGuidePage() {
           const d = getDistance(latitude, longitude, tLat, tLon);
           setDistance(d);
           const bearing = getBearing(latitude, longitude, tLat, tLon);
+          // Rotation = Target direction - where phone is pointing
           setArrowRotation(bearing - heading);
         }
       }
@@ -79,11 +84,9 @@ export default function TourGuidePage() {
     };
   }, [pois, heading]);
 
-  // --- 3. Street Name & POI Discovery ---
+  // --- 3. Discovery (Street & POIs) ---
   useEffect(() => {
     if (!location) return;
-    
-    // Fetch Street Name & Local POIs
     fetch('/api/discover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -92,13 +95,11 @@ export default function TourGuidePage() {
     .then(res => res.json())
     .then(data => {
       setPois(data.pois || []);
-      if (data.locationContext?.street) {
-        setAddress(data.locationContext.street);
-      }
+      if (data.locationContext?.street) setAddress(data.locationContext.street);
     });
   }, [location]);
 
-  // --- 4. Historical Narration ---
+  // --- 4. Narration & Audio Trigger ---
   const handleNarrate = async () => {
     try {
       const res = await fetch('/api/narrate', {
@@ -112,7 +113,6 @@ export default function TourGuidePage() {
       });
       const data = await res.json();
       
-      // Parse Story and Link
       const parts = data.text.split(/LINK:/i);
       const story = parts[0].replace(/STORY:/i, '').trim();
       const link = parts[1]?.trim() || '';
@@ -131,6 +131,7 @@ export default function TourGuidePage() {
   };
 
   const toggleAutoTour = async () => {
+    // Request permission for compass on iOS
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
       await (DeviceOrientationEvent as any).requestPermission();
     }
@@ -147,15 +148,18 @@ export default function TourGuidePage() {
     } else {
       clearInterval(countdownIntervalRef.current!);
       window.speechSynthesis.cancel();
+      setTimeLeft(30);
     }
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-black text-white p-4 max-w-lg mx-auto font-sans">
+    <div className="flex flex-col min-h-screen bg-black text-white p-4 max-w-lg mx-auto font-sans overflow-hidden">
       <header className="flex justify-between items-start mb-4">
         <div className="flex-1">
           <h1 className="font-black text-lime-500 text-xl italic tracking-tighter uppercase leading-none">3D VOLT TOUR</h1>
-          <p className="text-white font-bold text-xs mt-1 uppercase tracking-wider">{address}</p>
+          <p className="text-white font-bold text-[10px] mt-1 uppercase tracking-widest bg-zinc-900 w-fit px-2 py-0.5 rounded">
+            {address}
+          </p>
         </div>
         <button onClick={() => setIsMuted(!isMuted)} className={`px-4 py-2 rounded-full text-[9px] font-black border uppercase transition-all ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
           {isMuted ? '🔇 Muted' : '🔊 Sound On'}
@@ -163,12 +167,12 @@ export default function TourGuidePage() {
       </header>
 
       <main className="flex-1 flex flex-col items-center">
-        {/* Navigation Display */}
+        {/* Real-time 3D Arrow Display */}
         
         <div className="relative w-full aspect-square flex flex-col items-center justify-center">
           <div style={{ perspective: '1000px' }} className="relative z-10">
-            <div className="transition-transform duration-200" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
-              <div className="w-24 h-24 text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,1)]">
+            <div className="transition-transform duration-150 ease-linear" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
+              <div className="w-28 h-28 text-lime-400 drop-shadow-[0_0_20px_rgba(163,230,53,1)]">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="18 15 12 9 6 15" /><polyline points="18 9 12 3 6 9" />
                 </svg>
@@ -177,26 +181,52 @@ export default function TourGuidePage() {
           </div>
 
           <div className="mt-8 text-center">
-            <p className="text-5xl font-mono font-black tabular-nums">{distance !== null ? `${distance}m` : '--'}</p>
-            <p className="text-[10px] font-black text-lime-500 uppercase tracking-[0.4em]">Distance to Target</p>
+            <p className="text-6xl font-mono font-black tabular-nums tracking-tighter">
+              {distance !== null ? `${distance}m` : '--'}
+            </p>
+            <p className="text-[10px] font-black text-lime-500 uppercase tracking-[0.5em]">Target Proximity</p>
           </div>
         </div>
 
         {/* Story Display */}
-        <div className={`w-full mt-4 p-6 rounded-[2.5rem] border-2 transition-all duration-700 relative ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
-          <p className="text-zinc-100 text-lg font-medium italic text-center leading-relaxed">
-            {currentNarration || "Calibrating history for this location..."}
+        <div className={`w-full mt-2 p-6 rounded-[2.5rem] border-2 transition-all duration-700 relative ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
+          <p className="text-zinc-100 text-lg font-medium italic text-center leading-snug">
+            {currentNarration || "Finding history at your coordinates..."}
           </p>
           {factCheckLink && (
-            <a href={factCheckLink} target="_blank" className="mt-4 mx-auto block w-max bg-lime-500 text-black px-4 py-2 rounded-full text-[9px] font-black uppercase">
+            <a href={factCheckLink} target="_blank" className="mt-4 mx-auto block w-max bg-lime-500 text-black px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg shadow-lime-500/20">
               Verify Fact ↗
             </a>
           )}
         </div>
 
-        <button onClick={toggleAutoTour} className={`w-full mt-auto py-6 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600' : 'bg-lime-500 text-black shadow-2xl shadow-lime-500/40'}`}>
-          {autoLoopActive ? `Halt (${timeLeft}s)` : 'Begin Auto-Tour'}
-        </button>
+        {/* Voice Selector & Controls */}
+        <div className="w-full mt-4 space-y-3">
+          <div className="flex gap-2 bg-zinc-900 p-2 rounded-2xl border border-white/5">
+            <select 
+              value={selectedVoiceURI} 
+              onChange={(e) => setSelectedVoiceURI(e.target.value)}
+              className="flex-1 bg-transparent p-2 text-xs font-bold text-zinc-400 outline-none"
+            >
+              {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+            </select>
+            <button 
+              onClick={() => {
+                const u = new SpeechSynthesisUtterance("Audio active.");
+                const v = voices.find(x => x.voiceURI === selectedVoiceURI);
+                if(v) u.voice = v;
+                window.speechSynthesis.speak(u);
+              }}
+              className="bg-lime-500/20 text-lime-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase border border-lime-500/30"
+            >
+              Test
+            </button>
+          </div>
+
+          <button onClick={toggleAutoTour} className={`w-full py-6 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600 shadow-xl' : 'bg-lime-500 text-black shadow-2xl shadow-lime-500/40'}`}>
+            {autoLoopActive ? `Halt Tour (${timeLeft}s)` : 'Begin Auto-Tour'}
+          </button>
+        </div>
       </main>
     </div>
   );
