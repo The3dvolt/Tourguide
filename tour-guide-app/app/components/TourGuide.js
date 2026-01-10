@@ -4,35 +4,61 @@ export default function TourGuide() {
   const [loading, setLoading] = useState(false);
   const [narration, setNarration] = useState("");
   const [voices, setVoices] = useState([]);
-  const [selectedVoice, setSelectedVoice] = useState(null);
-  const audioRef = useRef(null); // Hidden audio for the silent-switch trick
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const audioRef = useRef(null);
 
-  // Load available voices on the device
+  // 1. Voice Loading Strategy for Safari
+  const loadVoices = () => {
+    const allVoices = window.speechSynthesis.getVoices();
+    if (allVoices.length > 0) {
+      // Filter for English or your preferred language
+      const filtered = allVoices.filter(v => v.lang.startsWith('en'));
+      setVoices(filtered);
+      
+      // Default to a high-quality Siri/Samantha voice if possible
+      if (!selectedVoiceURI) {
+        const best = filtered.find(v => v.name.includes('Samantha') || v.name.includes('Premium')) || filtered[0];
+        if (best) setSelectedVoiceURI(best.voiceURI);
+      }
+    }
+  };
+
   useEffect(() => {
-    const loadVoices = () => {
-      const availableVoices = window.speechSynthesis.getVoices();
-      // Filter for English voices that sound natural (Premium/Siri)
-      const enVoices = availableVoices.filter(v => v.lang.startsWith('en'));
-      setVoices(enVoices);
-      // Default to a natural-sounding voice if possible
-      const bestVoice = enVoices.find(v => v.name.includes('Samantha') || v.name.includes('Premium')) || enVoices[0];
-      setSelectedVoice(bestVoice?.voiceURI);
-    };
-
+    // Some browsers trigger this event when voices are ready
     window.speechSynthesis.onvoiceschanged = loadVoices;
     loadVoices();
-  }, []);
+    
+    // Safety interval for Safari mobile
+    const interval = setInterval(() => {
+      if (voices.length === 0) loadVoices();
+      else clearInterval(interval);
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [voices.length]);
+
+  // 2. The Unlock & Preview Function
+  const handlePreview = () => {
+    // Safari needs this "primer" to unlock the voice engine
+    const primer = new SpeechSynthesisUtterance("Voice preview active.");
+    const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
+    if (voice) primer.voice = voice;
+    
+    window.speechSynthesis.cancel(); // Stop any previous speech
+    window.speechSynthesis.speak(primer);
+    setIsUnlocked(true);
+  };
 
   const startTour = async () => {
     setLoading(true);
-
-    // 1. THE SILENT SWITCH FIX: Play a hidden silent audio file
-    // This 'primes' the iPhone to allow sound even if the silent switch is ON
+    
+    // Silent switch bypass
     if (audioRef.current) {
-      audioRef.current.play().catch(e => console.log("Silent audio blocked", e));
+      audioRef.current.play().catch(() => {});
     }
 
-    // 2. IPHONE UNLOCK: Prime the Speech engine
+    // Trigger dummy speech to ensure Safari allows subsequent auto-speech
     const primer = new SpeechSynthesisUtterance("");
     window.speechSynthesis.speak(primer);
 
@@ -56,61 +82,67 @@ export default function TourGuide() {
   };
 
   const speak = (text) => {
-    window.speechSynthesis.cancel(); // Stop any current speaking
+    window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    
-    // Use the voice selected by the user
-    const allVoices = window.speechSynthesis.getVoices();
-    const voice = allVoices.find(v => v.voiceURI === selectedVoice);
+    const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
     if (voice) utterance.voice = voice;
-
     utterance.rate = 0.95;
     window.speechSynthesis.speak(utterance);
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-gray-50 text-gray-900 font-sans">
-      {/* Hidden Audio element to bypass Silent Switch */}
+    <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 font-sans">
       <audio ref={audioRef} loop src="https://raw.githubusercontent.com/anars/blank-audio/master/1-second-of-silence.mp3" />
 
-      <h1 className="text-3xl font-extrabold mb-2 text-blue-600">3DVolt Historian</h1>
-      <p className="mb-8 text-gray-500">History narrated as you walk.</p>
+      <h1 className="text-3xl font-black text-blue-700 mb-2">3DVolt Guide</h1>
+      <p className="text-slate-500 mb-8 text-sm uppercase tracking-widest">Historical Navigator</p>
 
-      {/* Voice Selection Dropdown */}
-      <div className="mb-6 w-full max-w-xs">
-        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Select Your Guide</label>
+      {/* VOICE SELECTION BOX */}
+      <div className="w-full max-w-sm bg-white p-6 rounded-3xl shadow-xl mb-8 border border-slate-100">
+        <label className="block text-xs font-bold text-slate-400 mb-3 uppercase">Choose Your Guide's Voice</label>
+        
         <select 
-          value={selectedVoice} 
-          onChange={(e) => setSelectedVoice(e.target.value)}
-          className="w-full p-3 bg-white border border-gray-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500"
+          value={selectedVoiceURI} 
+          onChange={(e) => setSelectedVoiceURI(e.target.value)}
+          className="w-full p-4 bg-slate-100 rounded-2xl mb-4 border-none text-slate-700 font-medium appearance-none"
         >
-          {voices.map(v => (
-            <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>
-          ))}
+          {voices.length === 0 ? (
+            <option>Loading voices... (Tap Preview to start)</option>
+          ) : (
+            voices.map(v => (
+              <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>
+            ))
+          )}
         </select>
+
+        <button 
+          onClick={handlePreview}
+          className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold active:scale-95 transition-all text-sm"
+        >
+          {isUnlocked ? "TEST SELECTED VOICE 🔊" : "UNLOCK & PREVIEW VOICES 🔓"}
+        </button>
       </div>
 
-      {!loading && (
+      {!loading ? (
         <button 
           onClick={startTour}
-          className="bg-blue-600 hover:bg-blue-700 text-white w-48 h-48 rounded-full text-xl font-bold shadow-xl active:scale-95 transition-all flex flex-col items-center justify-center"
+          className="w-44 h-44 bg-blue-600 rounded-full shadow-2xl shadow-blue-200 border-8 border-white flex items-center justify-center flex-col text-white group active:scale-90 transition-all"
         >
-          <span>TAP TO</span>
-          <span>EXPLORE</span>
+          <span className="text-4xl mb-1">📍</span>
+          <span className="font-bold text-lg">START TOUR</span>
         </button>
-      )}
-
-      {loading && <div className="text-blue-500 animate-bounce text-xl font-bold">Checking local records...</div>}
-
-      {narration && (
-        <div className="mt-10 p-6 bg-white rounded-2xl shadow-lg border border-gray-100 max-w-md">
-          <p className="text-lg leading-relaxed text-gray-700 italic">"{narration}"</p>
+      ) : (
+        <div className="flex flex-col items-center">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="font-bold text-blue-600">Consulting History...</p>
         </div>
       )}
 
-      <p className="mt-8 text-xs text-gray-400">
-        Tip: If you hear nothing, ensure volume is up and Silent Switch is off.
-      </p>
+      {narration && (
+        <div className="mt-8 p-6 bg-blue-600 text-white rounded-3xl shadow-2xl max-w-md animate-in fade-in slide-in-from-bottom-4">
+          <p className="text-lg leading-relaxed font-medium italic">"{narration}"</p>
+        </div>
+      )}
     </div>
   );
 }
