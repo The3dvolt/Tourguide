@@ -1,35 +1,34 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-// Initialize Gemini with your API Key from Environment Variables
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
 export async function POST(req: Request) {
   try {
-    const { pois, locationContext } = await req.body.json();
+    const body = await req.json();
+    const { pois, locationContext } = body;
 
-    // 1. Prepare the model
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ text: "API Key missing", details: "Key not found in Vercel Env" }, { status: 500 });
+    }
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-    // 2. Build a high-quality prompt for a historian
-    const prompt = `
-      You are an expert local historian. 
-      Current Location: ${locationContext?.street}, ${locationContext?.city}.
-      Nearby Points of Interest: ${pois.map((p: any) => p.name).join(", ")}.
-      
-      Task: Narrate a fascinating historical story (max 3 sentences) about this specific area. 
-      Focus on architectural secrets or hidden events. 
-      Format: Speak directly to the traveler. Use a natural, engaging tone.
-    `;
+    // Validate that we actually have data to send to Gemini
+    if (!locationContext && (!pois || pois.length === 0)) {
+       return NextResponse.json({ text: "No location data", details: "Phone sent empty GPS context" }, { status: 400 });
+    }
 
-    // 3. Generate content
+    const prompt = `Historian guide. Location: ${locationContext?.city}. Landmarks: ${pois?.map((p:any) => p.name).join(', ')}. 2 sentences of history.`;
+
     const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = result.response.text();
 
     return NextResponse.json({ text });
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return NextResponse.json({ text: "The history here is deep, but my archives are temporarily unreachable." }, { status: 500 });
+  } catch (error: any) {
+    console.error(error);
+    return NextResponse.json({ 
+      text: "Archive Error", 
+      details: error.message // This sends the real error to your phone!
+    }, { status: 500 });
   }
 }
