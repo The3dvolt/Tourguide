@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
+import { useAudioUnlocking } from './hooks/useAudioUnlocking';
 
 interface POI {
   id: string;
@@ -23,6 +24,9 @@ export default function TourGuidePage() {
   
   const lastFetchedLocation = useRef<{lat: number, lon: number} | null>(null);
   
+  // Audio unlocking hook - must be unlocked before tour can start
+  const { isUnlocked, unlockAudio, getAudioContext } = useAudioUnlocking();
+  
   // Gemini Live API refs
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -31,6 +35,7 @@ export default function TourGuidePage() {
   const audioQueueRef = useRef<Float32Array[]>([]);
   const isPlayingRef = useRef<boolean>(false);
   const apiKeyRef = useRef<string | null>(null);
+  const lastGeminiLocationRef = useRef<{lat: number, lon: number} | null>(null);
 
   // --- Auth Logic ---
   useEffect(() => {
@@ -89,34 +94,29 @@ export default function TourGuidePage() {
         wsRef.current.close();
       }
 
-      // Gemini Live API WebSocket endpoint
-      // Note: This is the typical pattern for Gemini Live API
+      // Gemini 2.5 Flash Multimodal Live API WebSocket endpoint
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService/BidiGenerateContent?key=${apiKeyRef.current}`;
       
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('Gemini Live WebSocket connected');
+        console.log('Gemini 2.5 Flash Live WebSocket connected');
         
-        // Send initial configuration with natural/expressive voice
+        // Send initial configuration for Gemini 2.5 Flash Multimodal Live API
+        // Enable Google Maps Grounding tool for location-based historical information
         const configMessage = {
           setup: {
-            model: 'models/gemini-2.0-flash-exp',
+            model: 'models/gemini-2.5-flash-exp',
             generation_config: {
               response_modalities: ['AUDIO'],
-              speech_config: {
-                voice_config: {
-                  prebuilt_voice_config: {
-                    voice_name: 'Aoede' // Natural expressive voice
-                  }
-                }
-              }
             },
-            tools: [],
+            tools: [{
+              googleMaps: {}
+            }],
             system_instruction: {
               parts: [{
-                text: `You are a professional AI Tour Guide. Provide engaging, natural, and expressive narration about locations, history, and points of interest.`
+                text: 'You are a natural-sounding historian guide. When given coordinates, use Google Maps data to identify the nearest historical landmark and narrate an interesting historical fact about it in your natural voice.'
               }]
             }
           }
@@ -132,15 +132,15 @@ export default function TourGuidePage() {
         try {
           const message = JSON.parse(event.data);
           
-          // Handle audio response
+          // Handle audio response from Gemini 2.5 Flash Multimodal Live API
           if (message.serverContent && message.serverContent.modelTurn) {
             const modelTurn = message.serverContent.modelTurn;
             
-            // Check for audio data
+            // Check for audio data (audio/pcm format)
             if (modelTurn.parts) {
               for (const part of modelTurn.parts) {
                 if (part.inlineData && part.inlineData.mimeType === 'audio/pcm') {
-                  // Decode base64 audio data
+                  // Decode base64 audio data to ArrayBuffer
                   const audioData = atob(part.inlineData.data);
                   const audioBuffer = new ArrayBuffer(audioData.length);
                   const view = new Uint8Array(audioBuffer);
@@ -148,8 +148,8 @@ export default function TourGuidePage() {
                     view[i] = audioData.charCodeAt(i);
                   }
                   
-                  // Play audio
-                  await playAudioBuffer(audioBuffer);
+                  // Stream PCM audio to unlocked AudioContext
+                  await streamAudioPCM(audioBuffer);
                 } else if (part.text) {
                   // Update narration text if text is included
                   setCurrentNarration(part.text);
@@ -160,7 +160,7 @@ export default function TourGuidePage() {
 
           // Handle setup complete
           if (message.setupComplete) {
-            console.log('Gemini Live setup complete');
+            console.log('Gemini 2.5 Flash Live setup complete');
           }
         } catch (error) {
           console.error('Error processing WebSocket message:', error);
@@ -254,36 +254,92 @@ export default function TourGuidePage() {
     }
   };
 
-  const playAudioBuffer = async (audioBuffer: ArrayBuffer) => {
+  // Stream PCM audio to the unlocked AudioContext
+  const streamAudioPCM = async (pcmData: ArrayBuffer) => {
+    if (!isUnlocked) {
+      console.warn('Audio not unlocked, cannot stream audio');
+      return;
+    }
+
+    const context = getAudioContext();
+    if (!context) {
+      console.warn('AudioContext not available');
+      return;
+    }
+
     try {
-      // Create audio context for playback (24kHz for Gemini output)
-      const playbackContext = new AudioContext({ sampleRate: 24000 });
-      
-      // Convert PCM16 to AudioBuffer
-      const pcmData = new Int16Array(audioBuffer);
-      const floatData = new Float32Array(pcmData.length);
-      
-      for (let i = 0; i < pcmData.length; i++) {
-        floatData[i] = pcmData[i] / 32768.0;
+      // Ensure context is resumed (required for mobile)
+      if (context.state === 'suspended') {
+        await context.resume();
       }
 
-      const buffer = playbackContext.createBuffer(1, floatData.length, 24000);
+      // Convert PCM16 (little-endian) to Float32Array
+      const pcm16 = new Int16Array(pcmData);
+      const floatData = new Float32Array(pcm16.length);
+      
+      for (let i = 0; i < pcm16.length; i++) {
+        // Convert 16-bit PCM to float (-1.0 to 1.0)
+        floatData[i] = pcm16[i] / 32768.0;
+      }
+
+      // Create AudioBuffer with 24kHz sample rate (Gemini Live API output)
+      const buffer = context.createBuffer(1, floatData.length, 24000);
       buffer.copyToChannel(floatData, 0);
 
-      const source = playbackContext.createBufferSource();
+      const source = context.createBufferSource();
       source.buffer = buffer;
-      source.connect(playbackContext.destination);
+      source.connect(context.destination);
       
       isPlayingRef.current = true;
       source.onended = () => {
         isPlayingRef.current = false;
-        playbackContext.close();
       };
       
       source.start(0);
     } catch (error) {
-      console.error('Error playing audio:', error);
+      console.error('Error streaming PCM audio:', error);
       isPlayingRef.current = false;
+    }
+  };
+
+  const playAudioBuffer = async (audioBuffer: ArrayBuffer) => {
+    // Use the new streamAudioPCM function
+    await streamAudioPCM(audioBuffer);
+  };
+
+  // Send location coordinates to Gemini Live session for automatic narration
+  const sendLocationToGemini = async (lat: number, lon: number) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log('Gemini Live not connected, skipping location update');
+      return;
+    }
+
+    // Check if we've already sent this location (avoid duplicates)
+    if (lastGeminiLocationRef.current) {
+      const distance = getDist(lastGeminiLocationRef.current, { lat, lon });
+      if (distance < 30) {
+        // Location hasn't changed significantly
+        return;
+      }
+    }
+
+    try {
+      // Send location coordinates to Gemini Live with Google Maps Grounding
+      const locationMessage = {
+        request: {
+          contents: [{
+            parts: [{
+              text: `My current location coordinates are: Latitude ${lat}, Longitude ${lon}. Using Google Maps data, identify the nearest historical landmark and narrate an interesting historical fact about it.`
+            }]
+          }]
+        }
+      };
+
+      wsRef.current.send(JSON.stringify(locationMessage));
+      lastGeminiLocationRef.current = { lat, lon };
+      console.log('Sent location to Gemini Live:', lat, lon);
+    } catch (error) {
+      console.error('Error sending location to Gemini Live:', error);
     }
   };
 
@@ -300,6 +356,7 @@ export default function TourGuidePage() {
       processorRef.current.disconnect();
       processorRef.current = null;
     }
+    lastGeminiLocationRef.current = null;
   };
 
   const speakText = async (text: string) => {
@@ -383,9 +440,21 @@ export default function TourGuidePage() {
     });
   }, [location, radius]);
 
+  // Send location to Gemini Live when it changes significantly and voice is enabled
+  useEffect(() => {
+    if (!location || !isUnlocked || !voiceEnabled) return;
+    
+    // Wait a bit to ensure Gemini Live is connected
+    const timer = setTimeout(() => {
+      sendLocationToGemini(location.lat, location.lon);
+    }, 2000); // 2 second delay to ensure connection is ready
+
+    return () => clearTimeout(timer);
+  }, [location, isUnlocked, voiceEnabled]);
+
   // --- AI Trigger ---
   const handleNarrate = async () => {
-    if (isNarrating || !locationContext) return;
+    if (!isUnlocked || isNarrating || !locationContext) return;
 
     setIsNarrating(true);
     setCurrentNarration('Consulting Gemini Flash archives...');
@@ -405,6 +474,15 @@ export default function TourGuidePage() {
       setCurrentNarration("I'm observing the local history of " + locationContext?.city);
     } finally {
       setIsNarrating(false);
+    }
+  };
+
+  // Handle start button click - unlocks audio and starts the tour
+  const handleStartTour = async () => {
+    const unlocked = await unlockAudio();
+    if (unlocked) {
+      // Audio is now unlocked, tour can proceed
+      console.log('Tour started - audio unlocked');
     }
   };
 
@@ -451,31 +529,58 @@ export default function TourGuidePage() {
       </header>
 
       <main className="p-4 flex-1 space-y-4 max-w-lg mx-auto w-full">
-        <section className={`p-6 rounded-[2.5rem] border-2 transition-all duration-700 ${isNarrating ? 'border-blue-500 bg-blue-500/5' : 'border-white/5 bg-slate-950'}`}>
-           <h3 className="text-[10px] font-black text-slate-600 uppercase mb-4 tracking-widest flex items-center gap-2">
-             <div className={`w-2 h-2 rounded-full ${isNarrating ? 'bg-blue-500 animate-ping' : 'bg-slate-700'}`}></div>
-             History Archive
-           </h3>
-           <p className="text-xl font-medium leading-relaxed text-slate-200">
-            {currentNarration || (user ? `Hello ${user.user_metadata?.full_name?.split(' ')[0]}. Press Narrate to explore.` : "Please Login to unlock the AI.")}
-           </p>
-        </section>
+        {!isUnlocked ? (
+          // Show Start button before audio is unlocked (required for mobile)
+          <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
+            <section className="p-6 rounded-[2.5rem] border-2 border-white/5 bg-slate-950 text-center">
+              <h3 className="text-[10px] font-black text-slate-600 uppercase mb-4 tracking-widest">
+                Welcome to 3D VOLT TOUR
+              </h3>
+              <p className="text-xl font-medium leading-relaxed text-slate-200 mb-6">
+                {user ? `Hello ${user.user_metadata?.full_name?.split(' ')[0]}. Ready to explore?` : "Please Login to unlock the AI."}
+              </p>
+              <p className="text-sm text-slate-500 mb-8">
+                Click Start to begin your audio tour experience
+              </p>
+              <button 
+                onClick={handleStartTour}
+                disabled={!user}
+                className="w-full py-7 bg-blue-600 rounded-[2.5rem] font-black text-lg tracking-widest shadow-2xl active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                START TOUR
+              </button>
+            </section>
+          </div>
+        ) : (
+          // Show tour interface after audio is unlocked
+          <>
+            <section className={`p-6 rounded-[2.5rem] border-2 transition-all duration-700 ${isNarrating ? 'border-blue-500 bg-blue-500/5' : 'border-white/5 bg-slate-950'}`}>
+               <h3 className="text-[10px] font-black text-slate-600 uppercase mb-4 tracking-widest flex items-center gap-2">
+                 <div className={`w-2 h-2 rounded-full ${isNarrating ? 'bg-blue-500 animate-ping' : 'bg-slate-700'}`}></div>
+                 History Archive
+               </h3>
+               <p className="text-xl font-medium leading-relaxed text-slate-200">
+                {currentNarration || (user ? `Hello ${user.user_metadata?.full_name?.split(' ')[0]}. Press Narrate to explore.` : "Please Login to unlock the AI.")}
+               </p>
+            </section>
 
-        <button onClick={handleNarrate} disabled={isNarrating || !locationContext} className="w-full py-7 bg-blue-600 rounded-[2.5rem] font-black text-lg tracking-widest shadow-2xl active:scale-95 transition-all">
-          {isNarrating ? 'CONSULTING AI...' : 'NARRATE NOW'}
-        </button>
+            <button onClick={handleNarrate} disabled={isNarrating || !locationContext} className="w-full py-7 bg-blue-600 rounded-[2.5rem] font-black text-lg tracking-widest shadow-2xl active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+              {isNarrating ? 'CONSULTING AI...' : 'NARRATE NOW'}
+            </button>
 
-        <div className="space-y-3">
-          {pois.slice(0, 3).map((poi) => (
-            <div key={poi.id} className="bg-white/5 p-4 rounded-3xl border border-white/5 flex justify-between items-center">
-              <div>
-                <h4 className="font-bold text-slate-300">{poi.name}</h4>
-                <p className="text-[9px] text-slate-600 uppercase font-black">{poi.type.replace('_', ' ')}</p>
-              </div>
-              <span className="text-xs font-mono font-bold text-blue-500">{Math.round(poi.distance)}m</span>
+            <div className="space-y-3">
+              {pois.slice(0, 3).map((poi) => (
+                <div key={poi.id} className="bg-white/5 p-4 rounded-3xl border border-white/5 flex justify-between items-center">
+                  <div>
+                    <h4 className="font-bold text-slate-300">{poi.name}</h4>
+                    <p className="text-[9px] text-slate-600 uppercase font-black">{poi.type.replace('_', ' ')}</p>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-blue-500">{Math.round(poi.distance)}m</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </>
+        )}
       </main>
     </div>
   );
