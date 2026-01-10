@@ -38,6 +38,7 @@ export default function TourGuidePage() {
 
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastDiscoveryRef = useRef<number>(0); 
+  const lastReverseGeocodeRef = useRef<number>(0);
 
   useEffect(() => { setIsMounted(true); }, []);
 
@@ -54,25 +55,36 @@ export default function TourGuidePage() {
     loadVoices();
   }, [isMounted, selectedVoiceURI]);
 
-  // 🧭 Real-Time Sensor Tracking
+  // 🧭 Real-Time Sensor Tracking & Reverse Geocoding
   useEffect(() => {
     if (!isMounted) return;
 
     const handleOrientation = (e: any) => {
-      // iOS: webkitCompassHeading is the most accurate real-time compass
-      // Android: alpha provides the rotation
       const currentHeading = e.webkitCompassHeading || (360 - e.alpha) || 0;
       setHeading(currentHeading);
     };
 
-    // Listen for orientation changes every millisecond
     window.addEventListener('deviceorientation', handleOrientation, true);
     
-    // Listen for GPS location changes
-    const watchId = navigator.geolocation.watchPosition((pos) => {
+    const watchId = navigator.geolocation.watchPosition(async (pos) => {
       const { latitude, longitude } = pos.coords;
       setLocation({ lat: latitude, lon: longitude });
       
+      // REAL-TIME STREET DETECTION: Check every 10 seconds for a new address
+      const now = Date.now();
+      if (now - lastReverseGeocodeRef.current > 10000) {
+        lastReverseGeocodeRef.current = now;
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`);
+          const data = await res.json();
+          const houseNumber = data.address?.house_number ? `${data.address.house_number} ` : '';
+          const street = data.address?.road || data.address?.suburb || data.address?.city || "Unknown Path";
+          setAddress(`${houseNumber}${street}`.toUpperCase());
+        } catch (e) {
+          console.error("Geocoding failed", e);
+        }
+      }
+
       if (pois.length > 0) {
         const target = pois[0];
         const tLat = target.lat || target.center?.lat;
@@ -81,7 +93,6 @@ export default function TourGuidePage() {
           const dist = getDistance(latitude, longitude, tLat, tLon);
           const bearing = getBearing(latitude, longitude, tLat, tLon);
           setDistance(dist);
-          // Calculate Arrow rotation relative to your phone's heading
           setArrowRotation(bearing - heading);
         }
       }
@@ -93,7 +104,7 @@ export default function TourGuidePage() {
     };
   }, [isMounted, pois, heading]);
 
-  // 🗺️ Discovery Engine
+  // 🗺️ Discovery Engine (POI Updates)
   useEffect(() => {
     if (!location) return;
     const now = Date.now();
@@ -108,7 +119,6 @@ export default function TourGuidePage() {
     .then(res => res.json())
     .then(data => {
       setPois(data.pois?.length > 0 ? data.pois : [{ name: 'local history', lat: location.lat+0.001, lon: location.lon+0.001 }]);
-      if (data.locationContext?.street) setAddress(data.locationContext.street);
     });
   }, [location, radius]);
 
@@ -136,16 +146,11 @@ export default function TourGuidePage() {
   };
 
   const toggleAutoTour = async () => {
-    // 🔑 CRITICAL: Request sensor permissions on user interaction (Required by iOS)
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
       try {
         const permission = await (DeviceOrientationEvent as any).requestPermission();
-        if (permission !== 'granted') {
-          alert("Permission to access compass was denied. Arrow will not move.");
-        }
-      } catch (e) {
-        console.error("Permission request failed", e);
-      }
+        if (permission !== 'granted') alert("Compass permission denied.");
+      } catch (e) { console.error(e); }
     }
 
     const start = !autoLoopActive;
@@ -169,8 +174,9 @@ export default function TourGuidePage() {
       <header className="flex justify-between items-start mb-4">
         <div className="flex-1">
           <h1 className="font-black text-lime-500 text-xl italic uppercase tracking-tighter">3D VOLT TOUR</h1>
-          <p className="text-white font-bold text-[10px] mt-1 uppercase bg-zinc-900 px-2 py-0.5 rounded italic">
-            {address}
+          {/* Header shows Real-Time Street + Number */}
+          <p className="text-white font-bold text-[10px] mt-1 uppercase bg-zinc-900 px-2 py-0.5 rounded italic border border-white/5">
+            📍 {address}
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -183,7 +189,6 @@ export default function TourGuidePage() {
       </header>
 
       <main className="flex-1 flex flex-col items-center">
-        {/* THE COMPASS ARROW SECTION */}
         <div className="relative w-full aspect-square flex flex-col items-center justify-center">
           <div className="transition-transform duration-75 ease-out" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
             <div className="w-24 h-24 text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,1)]">
@@ -194,12 +199,10 @@ export default function TourGuidePage() {
           <p className="text-[10px] font-black text-lime-500 uppercase tracking-widest">Target Proximity</p>
         </div>
 
-        {/* NARRATION BOX */}
         <div className={`w-full p-6 rounded-[2.5rem] border-2 transition-all min-h-[120px] flex items-center justify-center ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
           <p className="text-zinc-100 text-center italic">{currentNarration || "Stand by for historical uplink..."}</p>
         </div>
 
-        {/* CONTROLS */}
         <div className="w-full mt-4 space-y-3">
           <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
             <label className="text-[8px] uppercase font-black text-lime-500 block mb-1">Personal API Key</label>
@@ -225,7 +228,6 @@ export default function TourGuidePage() {
             </div>
           </div>
 
-          {/* RADAR RANGE */}
           <div className="bg-zinc-900 p-3 rounded-xl border border-white/5">
             <div className="flex justify-between mb-1">
                <label className="text-[8px] uppercase font-black text-lime-500">Radar Range</label>
