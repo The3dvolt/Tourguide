@@ -4,7 +4,6 @@ export async function POST(req: Request) {
   try {
     const { lat, lon, radius } = await req.json();
 
-    // 1. Get the Address (Reverse Geocoding)
     const geoResponse = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`,
       { headers: { 'User-Agent': 'TourGuideApp/1.0' } }
@@ -12,7 +11,6 @@ export async function POST(req: Request) {
     const geoData = await geoResponse.json();
     const address = geoData.address || {};
 
-    // 2. Broaden search for ANY physical features (streets, shops, parks)
     const overpassQuery = `
       [out:json];
       (
@@ -28,9 +26,9 @@ export async function POST(req: Request) {
     });
     const osmData = await osmResponse.json();
 
-    const pois = osmData.elements
-      .filter((el: any) => el.tags && el.tags.name)
-      .map((el: any) => ({
+    const pois = (osmData.elements || [])
+      .filter((el: { tags?: { name?: string } }) => el.tags && el.tags.name)
+      .map((el: { id: number; tags: { name: string; amenity?: string; shop?: string; highway?: string } }) => ({
         id: el.id.toString(),
         name: el.tags.name,
         type: el.tags.amenity || el.tags.shop || el.tags.highway || 'location'
@@ -48,7 +46,6 @@ export async function POST(req: Request) {
     });
 
   } catch (error) {
-    console.error("Discovery error:", error);
     return NextResponse.json({ error: "Context discovery failed" }, { status: 500 });
   }
 }
