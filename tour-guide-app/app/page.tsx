@@ -1,10 +1,3 @@
-I have analyzed your code. The reason for the constant flashing and the "Obscured" error is a looping re-fetch in your useEffect. Every time a POI is found, the state updates, which triggers the effect again, causing a never-ending cycle that eventually hits your API limit.
-
-I have added a Ref-based cooldown and a hard-coded fallback inside the frontend to ensure that even if your backend or the external Overpass API fails, the app still has "Virtual Vectors" to narrate.
-
-🛠️ The Fixed app/page.tsx
-TypeScript
-
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -49,7 +42,7 @@ export default function TourGuidePage() {
   const [isMounted, setIsMounted] = useState(false);
 
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastDiscoveryRef = useRef<number>(0); // Prevents the flashing loop
+  const lastDiscoveryRef = useRef<number>(0); 
 
   // --- 0. Hydration Guard ---
   useEffect(() => {
@@ -111,13 +104,12 @@ export default function TourGuidePage() {
       window.removeEventListener('deviceorientation', handleOrientation);
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [isMounted, pois.length, heading]); // Removed full 'pois' to stop unnecessary triggers
+  }, [isMounted, pois.length, heading]);
 
-  // --- 3. POI Discovery (With Loop Protection) ---
+  // --- 3. POI Discovery (With Cooldown Loop Protection) ---
   useEffect(() => {
     if (!location) return;
     
-    // Cooldown: Only fetch once every 20 seconds to stop the flashing
     const now = Date.now();
     if (now - lastDiscoveryRef.current < 20000) return; 
     lastDiscoveryRef.current = now;
@@ -130,7 +122,6 @@ export default function TourGuidePage() {
     .then(res => res.json())
     .then(data => {
       if (!data.pois || data.pois.length === 0) {
-        // Essential Fallback POI
         setPois([{ 
             id: 'fallback', 
             name: 'the local history of this neighborhood', 
@@ -224,10 +215,10 @@ export default function TourGuidePage() {
         <div className="flex flex-col items-end gap-1">
             <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-tighter">POIS: {pois.length} FOUND</span>
             <button onClick={() => {
-            setIsMuted(!isMuted);
-            if (!isMuted) window.speechSynthesis.cancel();
+              setIsMuted(!isMuted);
+              if (!isMuted) window.speechSynthesis.cancel();
             }} className={`px-4 py-2 rounded-full text-[9px] font-black border uppercase transition-all ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
-            {isMuted ? '🔇 Muted' : '🔊 Sound On'}
+              {isMuted ? '🔇 Muted' : '🔊 Sound On'}
             </button>
         </div>
       </header>
