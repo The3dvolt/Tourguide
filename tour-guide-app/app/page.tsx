@@ -35,10 +35,9 @@ export default function TourGuidePage() {
   const [currentNarration, setCurrentNarration] = useState('');
   const [factCheckLink, setFactCheckLink] = useState('');
   const [autoLoopActive, setAutoLoopActive] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(30);
+  const [timeLeft, setTimeLeft] = useState(120); // Set to 120 seconds (2 minutes)
   const [isMuted, setIsMuted] = useState(false);
   
-  // Voice States
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   
@@ -63,16 +62,13 @@ export default function TourGuidePage() {
     const handleOrientation = (e: any) => {
       let compass = 0;
       if (e.webkitCompassHeading) {
-        // iOS Device
         compass = e.webkitCompassHeading;
       } else if (e.alpha !== null) {
-        // Android Device (Subtract from 360 to sync clockwise rotation)
         compass = 360 - e.alpha;
       }
       setHeading(compass);
     };
 
-    // Listen for orientation (Standard and Android Absolute)
     if ('ondeviceorientationabsolute' in window) {
       window.addEventListener('deviceorientationabsolute', handleOrientation, true);
     } else {
@@ -149,24 +145,27 @@ export default function TourGuidePage() {
   };
 
   const toggleAutoTour = async () => {
-    // Permission for iOS (Android will ignore this)
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
       await (DeviceOrientationEvent as any).requestPermission();
     }
     const start = !autoLoopActive;
     setAutoLoopActive(start);
+    
     if (start) {
       handleNarrate();
       countdownIntervalRef.current = setInterval(() => {
         setTimeLeft((prev) => {
-          if (prev <= 1) { handleNarrate(); return 30; }
+          if (prev <= 1) { 
+            handleNarrate(); 
+            return 120; // Reset to 2 minutes
+          }
           return prev - 1;
         });
       }, 1000);
     } else {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       window.speechSynthesis.cancel();
-      setTimeLeft(30);
+      setTimeLeft(120);
     }
   };
 
@@ -244,7 +243,7 @@ export default function TourGuidePage() {
           </div>
 
           <button onClick={toggleAutoTour} className={`w-full py-6 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600 shadow-xl' : 'bg-lime-500 text-black shadow-2xl shadow-lime-500/40'}`}>
-            {autoLoopActive ? `Halt Tour (${timeLeft}s)` : 'Begin Auto-Tour'}
+            {autoLoopActive ? `Halt Tour (${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})` : 'Begin Auto-Tour'}
           </button>
         </div>
       </main>
