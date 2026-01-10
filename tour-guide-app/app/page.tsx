@@ -11,17 +11,15 @@ function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3; // Earth radius in meters
+  const R = 6371e3; 
   const φ1 = lat1 * Math.PI / 180;
   const φ2 = lat2 * Math.PI / 180;
   const Δφ = (lat2 - lat1) * Math.PI / 180;
   const Δλ = (lon2 - lon1) * Math.PI / 180;
-
   const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
             Math.cos(φ1) * Math.cos(φ2) *
             Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
   return Math.round(R * c);
 }
 
@@ -35,15 +33,17 @@ export default function TourGuidePage() {
   const [currentNarration, setCurrentNarration] = useState('');
   const [factCheckLink, setFactCheckLink] = useState('');
   const [autoLoopActive, setAutoLoopActive] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(120); // Set to 120 seconds (2 minutes)
+  const [timeLeft, setTimeLeft] = useState(120); 
   const [isMuted, setIsMuted] = useState(false);
   
+  // Selection States
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
+  const [selectedModel, setSelectedModel] = useState("gemini-1.5-flash"); // Most free-tier friendly
   
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- 1. Audio Setup & Voice Loading ---
+  // --- 1. Audio Setup ---
   useEffect(() => {
     const loadVoices = () => {
       const v = window.speechSynthesis.getVoices();
@@ -57,7 +57,7 @@ export default function TourGuidePage() {
     loadVoices();
   }, [selectedVoiceURI]);
 
-  // --- 2. Android & iOS Compass + GPS Logic ---
+  // --- 2. Sensors (Android & iOS) ---
   useEffect(() => {
     const handleOrientation = (e: any) => {
       let compass = 0;
@@ -99,7 +99,7 @@ export default function TourGuidePage() {
     };
   }, [pois, heading]);
 
-  // --- 3. Discovery (Street & POIs) ---
+  // --- 3. POI Discovery ---
   useEffect(() => {
     if (!location) return;
     fetch('/api/discover', {
@@ -114,7 +114,7 @@ export default function TourGuidePage() {
     });
   }, [location]);
 
-  // --- 4. Narration & Voice Trigger ---
+  // --- 4. Narration Logic ---
   const handleNarrate = async () => {
     try {
       const res = await fetch('/api/narrate', {
@@ -123,7 +123,7 @@ export default function TourGuidePage() {
         body: JSON.stringify({ 
           pois, 
           locationContext: { street: address }, 
-          model: "gemini-2.5-flash" 
+          model: selectedModel 
         })
       });
       const data = await res.json();
@@ -157,7 +157,7 @@ export default function TourGuidePage() {
         setTimeLeft((prev) => {
           if (prev <= 1) { 
             handleNarrate(); 
-            return 120; // Reset to 2 minutes
+            return 120; 
           }
           return prev - 1;
         });
@@ -219,31 +219,50 @@ export default function TourGuidePage() {
           )}
         </div>
 
-        {/* Voice Selector & Test Button */}
-        <div className="w-full mt-4 space-y-3">
-          <div className="flex gap-2 bg-zinc-900 p-2 rounded-2xl border border-white/5">
-            <select 
-              value={selectedVoiceURI} 
-              onChange={(e) => setSelectedVoiceURI(e.target.value)}
-              className="flex-1 bg-transparent p-2 text-xs font-bold text-zinc-400 outline-none"
-            >
-              {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
-            </select>
-            <button 
-              onClick={() => {
-                const u = new SpeechSynthesisUtterance("System audio active.");
-                const v = voices.find(x => x.voiceURI === selectedVoiceURI);
-                if(v) u.voice = v;
-                window.speechSynthesis.speak(u);
-              }}
-              className="bg-lime-500/20 text-lime-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase border border-lime-500/30"
-            >
-              Test
-            </button>
+        {/* Settings Area: Model & Voice */}
+        <div className="w-full mt-4 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+             {/* Model Selector */}
+             <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
+                <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">AI Model</label>
+                <select 
+                  value={selectedModel} 
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none"
+                >
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Free Tier)</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                </select>
+             </div>
+
+             {/* Voice Selector */}
+             <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
+                <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">Narrator</label>
+                <select 
+                  value={selectedVoiceURI} 
+                  onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                  className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none truncate"
+                >
+                  {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+                </select>
+             </div>
           </div>
 
+          <button 
+            onClick={() => {
+              const u = new SpeechSynthesisUtterance("System ready.");
+              const v = voices.find(x => x.voiceURI === selectedVoiceURI);
+              if(v) u.voice = v;
+              window.speechSynthesis.speak(u);
+            }}
+            className="w-full py-2 bg-zinc-900 text-zinc-500 rounded-xl text-[9px] font-black uppercase border border-white/5 active:bg-lime-500 active:text-black transition-colors"
+          >
+            Test Audio Connection
+          </button>
+
           <button onClick={toggleAutoTour} className={`w-full py-6 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600 shadow-xl' : 'bg-lime-500 text-black shadow-2xl shadow-lime-500/40'}`}>
-            {autoLoopActive ? `Halt Tour (${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})` : 'Begin Auto-Tour'}
+            {autoLoopActive ? `Halt (${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})` : 'Begin Auto-Tour'}
           </button>
         </div>
       </main>
