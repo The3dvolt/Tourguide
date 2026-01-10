@@ -22,6 +22,15 @@ export default function TourGuidePage() {
   const [debugInfo, setDebugInfo] = useState('Syncing GPS...');
   
   const lastFetchedLocation = useRef<{lat: number, lon: number} | null>(null);
+  
+  // Gemini Live API refs
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const isPlayingRef = useRef<boolean>(false);
+  const apiKeyRef = useRef<string | null>(null);
 
   // --- Auth Logic ---
   useEffect(() => {
@@ -33,28 +42,310 @@ export default function TourGuidePage() {
   }, []);
 
   const handleLogin = () => {
-    unlockVoice(); // Prime voice engine on click
     supabase.auth.signInWithOAuth({ 
       provider: 'google', 
       options: { redirectTo: window.location.origin } 
     });
   };
 
-  // --- Voice & GPS Fixes ---
-  const unlockVoice = () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      const u = new SpeechSynthesisUtterance(' ');
-      u.volume = 0;
-      window.speechSynthesis.speak(u);
+  // --- Gemini Live API Voice Integration ---
+  useEffect(() => {
+    // Get API key on mount
+    fetch('/api/gemini-live')
+      .then(res => res.json())
+      .then(data => {
+        if (data.apiKey) {
+          apiKeyRef.current = data.apiKey;
+        }
+      })
+      .catch(err => console.error('Failed to get API key:', err));
+
+    return () => {
+      // Cleanup on unmount
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+    };
+  }, []);
+
+  const connectGeminiLive = async () => {
+    if (!apiKeyRef.current) {
+      console.error('API key not available');
+      return;
+    }
+
+    try {
+      // Close existing connection if any
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+
+      // Gemini Live API WebSocket endpoint
+      // Note: This is the typical pattern for Gemini Live API
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService/BidiGenerateContent?key=${apiKeyRef.current}`;
+      
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('Gemini Live WebSocket connected');
+        
+        // Send initial configuration with natural/expressive voice
+        const configMessage = {
+          setup: {
+            model: 'models/gemini-2.0-flash-exp',
+            generation_config: {
+              response_modalities: ['AUDIO'],
+              speech_config: {
+                voice_config: {
+                  prebuilt_voice_config: {
+                    voice_name: 'Aoede' // Natural expressive voice
+                  }
+                }
+              }
+            },
+            tools: [],
+            system_instruction: {
+              parts: [{
+                text: `You are a professional AI Tour Guide. Provide engaging, natural, and expressive narration about locations, history, and points of interest.`
+              }]
+            }
+          }
+        };
+
+        ws.send(JSON.stringify(configMessage));
+
+        // Start audio capture
+        startAudioCapture();
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          // Handle audio response
+          if (message.serverContent && message.serverContent.modelTurn) {
+            const modelTurn = message.serverContent.modelTurn;
+            
+            // Check for audio data
+            if (modelTurn.parts) {
+              for (const part of modelTurn.parts) {
+                if (part.inlineData && part.inlineData.mimeType === 'audio/pcm') {
+                  // Decode base64 audio data
+                  const audioData = atob(part.inlineData.data);
+                  const audioBuffer = new ArrayBuffer(audioData.length);
+                  const view = new Uint8Array(audioBuffer);
+                  for (let i = 0; i < audioData.length; i++) {
+                    view[i] = audioData.charCodeAt(i);
+                  }
+                  
+                  // Play audio
+                  await playAudioBuffer(audioBuffer);
+                } else if (part.text) {
+                  // Update narration text if text is included
+                  setCurrentNarration(part.text);
+                }
+              }
+            }
+          }
+
+          // Handle setup complete
+          if (message.setupComplete) {
+            console.log('Gemini Live setup complete');
+          }
+        } catch (error) {
+          console.error('Error processing WebSocket message:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+        wsRef.current = null;
+      };
+
+    } catch (error) {
+      console.error('Failed to connect to Gemini Live:', error);
     }
   };
 
-  const speakText = (text: string) => {
-    if (!voiceEnabled || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+  // Helper function to convert binary data to base64
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunkSize = 8192; // Process in chunks to avoid stack overflow
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    return btoa(binary);
+  };
+
+  const startAudioCapture = async () => {
+    try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        } 
+      });
+      
+      mediaStreamRef.current = stream;
+
+      // Create audio context with 16kHz sample rate for input
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      
+      // Create script processor for audio chunks (4096 buffer size)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (event) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const inputData = event.inputBuffer.getChannelData(0);
+          
+          // Convert Float32Array to 16-bit PCM (little-endian)
+          const pcmData = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const sample = Math.max(-1, Math.min(1, inputData[i]));
+            pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+          }
+
+          // Send audio chunk to Gemini (using base64 encoding)
+          const message = {
+            request: {
+              contents: [{
+                parts: [{
+                  inlineData: {
+                    mimeType: 'audio/pcm',
+                    data: arrayBufferToBase64(pcmData.buffer)
+                  }
+                }]
+              }]
+            }
+          };
+
+          wsRef.current.send(JSON.stringify(message));
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+    }
+  };
+
+  const playAudioBuffer = async (audioBuffer: ArrayBuffer) => {
+    try {
+      // Create audio context for playback (24kHz for Gemini output)
+      const playbackContext = new AudioContext({ sampleRate: 24000 });
+      
+      // Convert PCM16 to AudioBuffer
+      const pcmData = new Int16Array(audioBuffer);
+      const floatData = new Float32Array(pcmData.length);
+      
+      for (let i = 0; i < pcmData.length; i++) {
+        floatData[i] = pcmData[i] / 32768.0;
+      }
+
+      const buffer = playbackContext.createBuffer(1, floatData.length, 24000);
+      buffer.copyToChannel(floatData, 0);
+
+      const source = playbackContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(playbackContext.destination);
+      
+      isPlayingRef.current = true;
+      source.onended = () => {
+        isPlayingRef.current = false;
+        playbackContext.close();
+      };
+      
+      source.start(0);
+    } catch (error) {
+      console.error('Error playing audio:', error);
+      isPlayingRef.current = false;
+    }
+  };
+
+  const disconnectGeminiLive = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+  };
+
+  const speakText = async (text: string) => {
+    if (!voiceEnabled) return;
+    
+    // Connect and send text as initial message if not already connected
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      await connectGeminiLive();
+      // Wait a bit for connection to establish
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Send text message to Gemini for voice response
+      const message = {
+        request: {
+          contents: [{
+            parts: [{
+              text: text
+            }]
+          }]
+        }
+      };
+      wsRef.current.send(JSON.stringify(message));
+    }
+  };
+
+  // --- Historical Guide Function ---
+  const getHistoricalGuide = async (lat: number, lon: number, conversationHistory?: Array<{role: string, content: string}>) => {
+    try {
+      const res = await fetch('/api/historical-guide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          latitude: lat, 
+          longitude: lon,
+          conversationHistory: conversationHistory || []
+        })
+      });
+      
+      const data = await res.json();
+      return data.text || data.error || 'Unable to get historical guide information.';
+    } catch (error) {
+      console.error('Error calling historical guide:', error);
+      return 'I apologize, but I encountered an error while trying to identify the nearest historical landmark.';
+    }
   };
 
   const getDist = (l1: any, l2: any) => {
@@ -95,7 +386,6 @@ export default function TourGuidePage() {
   // --- AI Trigger ---
   const handleNarrate = async () => {
     if (isNarrating || !locationContext) return;
-    if (voiceEnabled) unlockVoice();
 
     setIsNarrating(true);
     setCurrentNarration('Consulting Gemini Flash archives...');
@@ -108,7 +398,9 @@ export default function TourGuidePage() {
       });
       const data = await res.json();
       setCurrentNarration(data.text);
-      if (voiceEnabled) speakText(data.text);
+      if (voiceEnabled) {
+        await speakText(data.text);
+      }
     } catch (e) {
       setCurrentNarration("I'm observing the local history of " + locationContext?.city);
     } finally {
@@ -125,7 +417,18 @@ export default function TourGuidePage() {
             <p className="text-[9px] text-slate-500 uppercase font-bold">{debugInfo}</p>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => { setVoiceEnabled(!voiceEnabled); if (!voiceEnabled) unlockVoice(); }} className={`p-2 rounded-full transition ${voiceEnabled ? 'bg-green-600' : 'bg-slate-800'}`}>
+            <button 
+              onClick={() => { 
+                const newState = !voiceEnabled;
+                setVoiceEnabled(newState);
+                if (newState) {
+                  connectGeminiLive();
+                } else {
+                  disconnectGeminiLive();
+                }
+              }} 
+              className={`p-2 rounded-full transition ${voiceEnabled ? 'bg-green-600' : 'bg-slate-800'}`}
+            >
               {voiceEnabled ? '🔊' : '🔇'}
             </button>
             {user ? (
