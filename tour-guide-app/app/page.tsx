@@ -23,21 +23,24 @@ export default function TourGuidePage() {
   const [isMuted, setIsMuted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
   
+  // Using refs to ensure the timer always has the latest state
   const loopTimerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- 1. Voice Initialization ---
+  // --- 1. Voice Initialization (Fix for Mobile) ---
   useEffect(() => {
-    const updateVoices = () => {
+    const loadVoices = () => {
       const v = window.speechSynthesis.getVoices();
-      const englishVoices = v.filter(voice => voice.lang.startsWith('en'));
-      setVoices(englishVoices);
-      if (englishVoices.length > 0 && !selectedVoiceURI) {
-        setSelectedVoiceURI(englishVoices[0].voiceURI);
+      if (v.length > 0) {
+        const englishVoices = v.filter(voice => voice.lang.startsWith('en'));
+        setVoices(englishVoices);
+        if (englishVoices.length > 0 && !selectedVoiceURI) {
+          setSelectedVoiceURI(englishVoices[0].voiceURI);
+        }
       }
     };
-    window.speechSynthesis.onvoiceschanged = updateVoices;
-    updateVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    loadVoices();
   }, [selectedVoiceURI]);
 
   // --- 2. GPS & Auth ---
@@ -67,12 +70,31 @@ export default function TourGuidePage() {
     });
   }, [location, radius]);
 
-  // --- 4. Narration Engine ---
+  // --- 4. The Countdown Logic (Fix for Stuck Timer) ---
+  const startTimer = () => {
+    // Clear any existing intervals
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+
+    setTimeLeft(30);
+
+    countdownIntervalRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          // Trigger next narration when we hit 0
+          if (autoLoopActive) handleNarrate(true);
+          return 30; // Reset
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // --- 5. Narration Engine (Fix for Audio) ---
   const handleNarrate = async (isAutoCall = false) => {
     if (isNarrating && !isAutoCall) return;
     setIsNarrating(true);
     setLastApiError('');
-    setTimeLeft(30); // Reset countdown on start
 
     try {
       const res = await fetch('/api/narrate', {
@@ -91,18 +113,18 @@ export default function TourGuidePage() {
       setCurrentNarration(storyText);
       setExternalLink(linkText);
       
-      // Voice Output Logic
+      // VOICE FIX: Re-initialize Speech on every call
       if (!isMuted) {
-        window.speechSynthesis.cancel();
+        window.speechSynthesis.cancel(); // Stop current speech
         const utterance = new SpeechSynthesisUtterance(storyText);
+        
+        // Find the selected voice
         const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
         if (voice) utterance.voice = voice;
+        
+        // Essential for mobile browsers to allow "pocket" narration
+        utterance.onend = () => console.log("Speech finished");
         window.speechSynthesis.speak(utterance);
-      }
-
-      // Manage Loops
-      if (autoLoopActive || !isAutoCall) {
-        startCountdown();
       }
 
     } catch (e: any) {
@@ -112,30 +134,18 @@ export default function TourGuidePage() {
     }
   };
 
-  const startCountdown = () => {
-    if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-
-    setTimeLeft(30);
-    
-    countdownIntervalRef.current = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-
-    loopTimerRef.current = setTimeout(() => {
-      if (autoLoopActive) handleNarrate(true);
-    }, 30000);
-  };
-
   const toggleAutoTour = () => {
     const newState = !autoLoopActive;
     setAutoLoopActive(newState);
+    
     if (newState) {
       handleNarrate(true);
+      startTimer();
     } else {
-      if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
       window.speechSynthesis.cancel();
+      setTimeLeft(30);
     }
   };
 
@@ -146,7 +156,7 @@ export default function TourGuidePage() {
           <h1 className="font-black text-blue-500 text-2xl italic tracking-tighter">3D VOLT TOUR</h1>
           <button 
             onClick={() => setIsMuted(!isMuted)} 
-            className={`p-2 rounded-full border ${isMuted ? 'border-red-500 text-red-500' : 'border-blue-500 text-blue-500'}`}
+            className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-colors ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-green-500 text-green-500 bg-green-500/10'}`}
           >
             {isMuted ? '🔇 Muted' : '🔊 Sound On'}
           </button>
@@ -155,44 +165,48 @@ export default function TourGuidePage() {
 
       <main className="space-y-4">
         {/* Story Box & Timer */}
-        <div className={`p-6 rounded-[2.5rem] border-2 min-h-[220px] relative transition-all duration-700 ${autoLoopActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/5 bg-slate-950'}`}>
+        <div className={`p-6 rounded-[2.5rem] border-2 min-h-[220px] relative flex flex-col justify-center transition-all duration-700 ${autoLoopActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/5 bg-slate-950'}`}>
           {autoLoopActive && (
-            <div className="absolute top-4 right-6 flex items-center gap-2">
-              <span className="text-[10px] font-black text-blue-500 uppercase">Next Sync:</span>
-              <span className="text-xl font-mono font-black text-white">{timeLeft}s</span>
+            <div className="absolute top-6 right-8 flex flex-col items-end">
+              <span className="text-[8px] font-black text-blue-500 uppercase tracking-[0.2em] mb-1">Next Fact</span>
+              <span className="text-2xl font-mono font-black text-white tabular-nums">{timeLeft}s</span>
             </div>
           )}
           
-          <p className="text-slate-200 text-lg font-medium italic leading-relaxed text-center mt-6">
-            {currentNarration || "System ready for exploration..."}
+          <p className="text-slate-200 text-lg font-medium italic leading-relaxed text-center px-2">
+            {currentNarration || "Calibrating archives for your location..."}
           </p>
           
           {externalLink && (
-            <a href={externalLink} target="_blank" className="mt-6 mx-auto bg-blue-600/20 text-blue-400 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-blue-400/30">
-              Verify Evidence ↗
+            <a href={externalLink} target="_blank" className="mt-8 mx-auto bg-blue-600/20 text-blue-400 px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-blue-400/30">
+              Verify History ↗
             </a>
           )}
         </div>
 
         {/* Narrator Voice Selector */}
         <section className="bg-slate-900 p-4 rounded-2xl border border-white/5">
-          <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block">Narrator Voice</label>
+          <label className="text-[9px] font-black text-slate-500 uppercase mb-2 block tracking-widest">Selected Narrator</label>
           <select 
             value={selectedVoiceURI} 
             onChange={(e) => setSelectedVoiceURI(e.target.value)}
-            className="w-full bg-black border border-white/10 p-2 rounded-xl text-xs font-bold text-slate-300"
+            className="w-full bg-black border border-white/10 p-3 rounded-xl text-xs font-bold text-slate-300 outline-none focus:border-blue-500"
           >
-            {voices.map(voice => (
+            {voices.length > 0 ? voices.map(voice => (
               <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name}</option>
-            ))}
+            )) : <option>Loading system voices...</option>}
           </select>
         </section>
 
-        <div className="grid grid-cols-1 gap-3">
-          <button onClick={toggleAutoTour} className={`w-full py-6 rounded-full font-black text-lg uppercase tracking-tighter transition-all border-2 ${autoLoopActive ? 'bg-red-600 border-red-600' : 'bg-transparent border-blue-600 text-blue-500'}`}>
-            {autoLoopActive ? 'Stop Auto-Tour' : 'Start Auto-Tour (30s)'}
-          </button>
-        </div>
+        <button onClick={toggleAutoTour} className={`w-full py-7 rounded-full font-black text-xl uppercase tracking-tighter transition-all shadow-xl active:scale-95 ${autoLoopActive ? 'bg-red-600 shadow-red-900/20' : 'bg-blue-600 shadow-blue-900/20'}`}>
+          {autoLoopActive ? 'Stop Auto-Tour' : 'Start Auto-Tour'}
+        </button>
+
+        {lastApiError && (
+          <p className="text-[9px] text-red-500 font-mono text-center uppercase py-2 bg-red-500/5 rounded-lg border border-red-500/20">
+            {lastApiError}
+          </p>
+        )}
       </main>
     </div>
   );
