@@ -31,23 +31,29 @@ export default function TourGuidePage() {
   const [distance, setDistance] = useState<number | null>(null);
   const [arrowRotation, setArrowRotation] = useState(0);
   const [currentNarration, setCurrentNarration] = useState('');
-  const [factCheckLink, setFactCheckLink] = useState('');
   const [autoLoopActive, setAutoLoopActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(120); 
   const [isMuted, setIsMuted] = useState(false);
-  const [radius] = useState(5000); // 5km Mega-search radius
+  const [radius] = useState(5000); 
   
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
-  const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash"); // Forced to stable naming
-  
+  const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash"); 
+  const [isMounted, setIsMounted] = useState(false);
+
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // --- 0. Hydration Guard ---
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // --- 1. Audio Setup ---
   useEffect(() => {
+    if (!isMounted) return;
     const loadVoices = () => {
       const v = window.speechSynthesis.getVoices();
-      const engVoices = v.filter(v => v.lang.startsWith('en'));
+      const engVoices = v.filter(voice => voice.lang.startsWith('en'));
       setVoices(engVoices);
       if (engVoices.length > 0 && !selectedVoiceURI) {
         setSelectedVoiceURI(engVoices[0].voiceURI);
@@ -55,10 +61,12 @@ export default function TourGuidePage() {
     };
     window.speechSynthesis.onvoiceschanged = loadVoices;
     loadVoices();
-  }, [selectedVoiceURI]);
+  }, [isMounted, selectedVoiceURI]);
 
   // --- 2. Sensors (GPS & Compass) ---
   useEffect(() => {
+    if (!isMounted) return;
+
     const handleOrientation = (e: any) => {
       let compass = 0;
       if (e.webkitCompassHeading) {
@@ -80,10 +88,10 @@ export default function TourGuidePage() {
       setLocation({ lat: latitude, lon: longitude });
 
       if (pois.length > 0) {
-        // Target the nearest POI
         const target = pois[0];
-        const tLat = target.lat || target.center?.lat;
-        const tLon = target.lon || target.center?.lon;
+        const tLat = target.lat || target.center?.lat || (target.lat);
+        const tLon = target.lon || target.center?.lon || (target.lon);
+        
         if (tLat && tLon) {
           const d = getDistance(latitude, longitude, tLat, tLon);
           setDistance(d);
@@ -98,9 +106,9 @@ export default function TourGuidePage() {
       window.removeEventListener('deviceorientation', handleOrientation);
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [pois, heading]);
+  }, [isMounted, pois, heading]);
 
-  // --- 3. POI Discovery (Mega-Search) ---
+  // --- 3. POI Discovery ---
   useEffect(() => {
     if (!location) return;
     fetch('/api/discover', {
@@ -110,7 +118,6 @@ export default function TourGuidePage() {
     })
     .then(res => res.json())
     .then(data => {
-      // Logic: If 0 POIs, add a fallback architectural subject
       if (!data.pois || data.pois.length === 0) {
         setPois([{ id: 'fallback', name: 'the local urban architecture', lat: location.lat + 0.001, lon: location.lon + 0.001 }]);
       } else {
@@ -133,16 +140,13 @@ export default function TourGuidePage() {
         })
       });
 
-      if (!res.ok) throw new Error("API Path Error");
-
       const data = await res.json();
-      
-      // Clean up the text response
+      if (!res.ok) throw new Error(data.details || "API Error");
+
       const cleanText = data.text.replace(/STORY:|LINK:|LINKEDIN:|VERIFY:/gi, '').trim();
       setCurrentNarration(cleanText);
 
-      // Voice Output
-      if (!isMuted) {
+      if (!isMuted && typeof window !== 'undefined') {
         window.speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(cleanText);
         const v = voices.find(x => x.voiceURI === selectedVoiceURI);
@@ -156,7 +160,6 @@ export default function TourGuidePage() {
   };
 
   const toggleAutoTour = async () => {
-    // Permission unlock for iOS sensors
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
       try { await (DeviceOrientationEvent as any).requestPermission(); } catch (e) { console.warn(e); }
     }
@@ -177,10 +180,12 @@ export default function TourGuidePage() {
       }, 1000);
     } else {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      window.speechSynthesis.cancel();
+      if (typeof window !== 'undefined') window.speechSynthesis.cancel();
       setTimeLeft(120);
     }
   };
+
+  if (!isMounted) return <div className="min-h-screen bg-black" />;
 
   return (
     <div className="flex flex-col min-h-screen bg-black text-white p-4 max-w-lg mx-auto font-sans overflow-hidden">
@@ -203,7 +208,6 @@ export default function TourGuidePage() {
       </header>
 
       <main className="flex-1 flex flex-col items-center">
-        {/* Navigation Display */}
         <div className="relative w-full aspect-square flex flex-col items-center justify-center">
           <div style={{ perspective: '1200px' }} className="relative z-10">
             <div className="transition-transform duration-150 ease-linear" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
@@ -223,14 +227,12 @@ export default function TourGuidePage() {
           </div>
         </div>
 
-        {/* Story Display */}
         <div className={`w-full mt-2 p-6 rounded-[2.5rem] border-2 transition-all duration-700 relative min-h-[140px] flex flex-col justify-center ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
           <p className="text-zinc-100 text-lg font-medium italic text-center leading-snug">
             {currentNarration || "Calibrating historical vectors..."}
           </p>
         </div>
 
-        {/* Settings Area */}
         <div className="w-full mt-4 space-y-2">
           <div className="grid grid-cols-2 gap-2">
              <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
@@ -240,7 +242,7 @@ export default function TourGuidePage() {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Stable)</option>
                   <option value="gemini-3-flash">Gemini 3 Flash (Fast)</option>
                 </select>
              </div>
