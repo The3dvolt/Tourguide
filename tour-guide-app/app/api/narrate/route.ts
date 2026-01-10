@@ -6,38 +6,34 @@ export async function POST(req: Request) {
     const { pois, locationContext, model, customKey } = await req.json();
     const activeKey = customKey || process.env.GEMINI_API_KEY;
 
-    if (!activeKey) return NextResponse.json({ text: "Missing API Key" }, { status: 401 });
+    if (!activeKey) return NextResponse.json({ text: "API Key missing" }, { status: 401 });
 
     const genAI = new GoogleGenerativeAI(activeKey);
     
-    // FIX: Using the absolute 'models/...' prefix 
-    // This is the most compatible way to call the API
-    let modelPath = "models/gemini-1.5-flash"; 
+    // UPDATED MODEL NAMES (Avoids 404 Retired Model Errors)
+    let modelPath = "models/gemini-2.5-flash"; // The current workhorse stable model
     
-    if (model === "gemini-2.0-flash-exp") {
-      modelPath = "models/gemini-2.0-flash-exp";
+    if (model === "gemini-3-flash") {
+      modelPath = "models/gemini-3-flash-preview"; // Fast and smarter
     } else if (model?.includes("pro")) {
-      modelPath = "models/gemini-1.5-pro";
+      modelPath = "models/gemini-2.5-pro"; // For complex reasoning
     }
 
-    // Initialize with the explicit path
     const genModel = genAI.getGenerativeModel({ model: modelPath });
 
-    const subjects = pois && pois.length > 0 
+    const landmarkInfo = pois && pois.length > 0 
       ? pois.map((p: any) => p.name).join(", ") 
-      : "the local landscape";
+      : "the local area";
 
-    const prompt = `You are a local historian. Narrate a 2-sentence story about ${subjects} in ${locationContext?.street || 'this area'}.`;
+    const prompt = `You are a professional local historian. Narrate a 2-sentence story about ${landmarkInfo} in ${locationContext?.street || 'this area'}.`;
 
     const result = await genModel.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = result.response.text();
 
     return NextResponse.json({ text });
 
   } catch (error: any) {
-    console.error("Gemini Error:", error);
-    // Return detailed error to help us see if it's still a 404
+    console.error("Gemini API Error:", error);
     return NextResponse.json({ 
       text: "The archive is currently unreachable.", 
       details: error.message 
