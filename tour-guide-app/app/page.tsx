@@ -28,8 +28,8 @@ export default function TourGuidePage() {
   const [currentNarration, setCurrentNarration] = useState('');
   const [autoLoopActive, setAutoLoopActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(120); 
-  const [isMuted, setIsMuted] = useState(false); // Default Sound ON
-  const [radius, setRadius] = useState(5000); // Default High Value
+  const [isMuted, setIsMuted] = useState(false);
+  const [radius, setRadius] = useState(5000); 
   const [userApiKey, setUserApiKey] = useState("");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
@@ -41,6 +41,7 @@ export default function TourGuidePage() {
 
   useEffect(() => { setIsMounted(true); }, []);
 
+  // 🔊 Audio Setup
   useEffect(() => {
     if (!isMounted) return;
     const loadVoices = () => {
@@ -53,31 +54,46 @@ export default function TourGuidePage() {
     loadVoices();
   }, [isMounted, selectedVoiceURI]);
 
+  // 🧭 Real-Time Sensor Tracking
   useEffect(() => {
     if (!isMounted) return;
+
     const handleOrientation = (e: any) => {
-      setHeading(e.webkitCompassHeading || (360 - e.alpha) || 0);
+      // iOS: webkitCompassHeading is the most accurate real-time compass
+      // Android: alpha provides the rotation
+      const currentHeading = e.webkitCompassHeading || (360 - e.alpha) || 0;
+      setHeading(currentHeading);
     };
-    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+
+    // Listen for orientation changes every millisecond
+    window.addEventListener('deviceorientation', handleOrientation, true);
+    
+    // Listen for GPS location changes
     const watchId = navigator.geolocation.watchPosition((pos) => {
       const { latitude, longitude } = pos.coords;
       setLocation({ lat: latitude, lon: longitude });
+      
       if (pois.length > 0) {
         const target = pois[0];
         const tLat = target.lat || target.center?.lat;
         const tLon = target.lon || target.center?.lon;
         if (tLat && tLon) {
-          setDistance(getDistance(latitude, longitude, tLat, tLon));
-          setArrowRotation(getBearing(latitude, longitude, tLat, tLon) - heading);
+          const dist = getDistance(latitude, longitude, tLat, tLon);
+          const bearing = getBearing(latitude, longitude, tLat, tLon);
+          setDistance(dist);
+          // Calculate Arrow rotation relative to your phone's heading
+          setArrowRotation(bearing - heading);
         }
       }
-    }, null, { enableHighAccuracy: true });
+    }, (err) => console.error("GPS Error:", err), { enableHighAccuracy: true });
+
     return () => {
-      window.removeEventListener('deviceorientationabsolute', handleOrientation);
+      window.removeEventListener('deviceorientation', handleOrientation);
       navigator.geolocation.clearWatch(watchId);
     };
   }, [isMounted, pois, heading]);
 
+  // 🗺️ Discovery Engine
   useEffect(() => {
     if (!location) return;
     const now = Date.now();
@@ -120,9 +136,18 @@ export default function TourGuidePage() {
   };
 
   const toggleAutoTour = async () => {
+    // 🔑 CRITICAL: Request sensor permissions on user interaction (Required by iOS)
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
-      try { await (DeviceOrientationEvent as any).requestPermission(); } catch (e) {}
+      try {
+        const permission = await (DeviceOrientationEvent as any).requestPermission();
+        if (permission !== 'granted') {
+          alert("Permission to access compass was denied. Arrow will not move.");
+        }
+      } catch (e) {
+        console.error("Permission request failed", e);
+      }
     }
+
     const start = !autoLoopActive;
     setAutoLoopActive(start);
     if (start) {
@@ -158,8 +183,9 @@ export default function TourGuidePage() {
       </header>
 
       <main className="flex-1 flex flex-col items-center">
+        {/* THE COMPASS ARROW SECTION */}
         <div className="relative w-full aspect-square flex flex-col items-center justify-center">
-          <div className="transition-transform duration-150 ease-linear" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
+          <div className="transition-transform duration-75 ease-out" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
             <div className="w-24 h-24 text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,1)]">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="18 15 12 9 6 15" /><polyline points="18 9 12 3 6 9" /></svg>
             </div>
@@ -168,10 +194,12 @@ export default function TourGuidePage() {
           <p className="text-[10px] font-black text-lime-500 uppercase tracking-widest">Target Proximity</p>
         </div>
 
+        {/* NARRATION BOX */}
         <div className={`w-full p-6 rounded-[2.5rem] border-2 transition-all min-h-[120px] flex items-center justify-center ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
           <p className="text-zinc-100 text-center italic">{currentNarration || "Stand by for historical uplink..."}</p>
         </div>
 
+        {/* CONTROLS */}
         <div className="w-full mt-4 space-y-3">
           <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
             <label className="text-[8px] uppercase font-black text-lime-500 block mb-1">Personal API Key</label>
@@ -197,6 +225,7 @@ export default function TourGuidePage() {
             </div>
           </div>
 
+          {/* RADAR RANGE */}
           <div className="bg-zinc-900 p-3 rounded-xl border border-white/5">
             <div className="flex justify-between mb-1">
                <label className="text-[8px] uppercase font-black text-lime-500">Radar Range</label>
@@ -205,7 +234,7 @@ export default function TourGuidePage() {
             <input type="range" min="500" max="10000" step="500" value={radius} onChange={(e) => setRadius(parseInt(e.target.value))} className="w-full accent-lime-500" />
           </div>
 
-          <button onClick={toggleAutoTour} className={`w-full py-5 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600' : 'bg-lime-500 text-black'}`}>
+          <button onClick={toggleAutoTour} className={`w-full py-5 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600 shadow-[0_0_20px_rgba(220,38,38,0.4)]' : 'bg-lime-500 text-black shadow-[0_0_20px_rgba(163,230,53,0.4)]'}`}>
             {autoLoopActive ? `Stop (${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})` : 'Begin Discovery'}
           </button>
         </div>
