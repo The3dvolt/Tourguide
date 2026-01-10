@@ -10,32 +10,47 @@ export async function POST(req: Request) {
 
     const genAI = new GoogleGenerativeAI(activeKey);
     
-    // UPDATED MODEL NAMES (Avoids 404 Retired Model Errors)
-    let modelPath = "models/gemini-2.5-flash"; // The current workhorse stable model
+    // Using current 2026 stable model paths
+    let modelPath = "models/gemini-2.5-flash"; 
     
     if (model === "gemini-3-flash") {
-      modelPath = "models/gemini-3-flash-preview"; // Fast and smarter
+      modelPath = "models/gemini-3-flash-preview"; 
     } else if (model?.includes("pro")) {
-      modelPath = "models/gemini-2.5-pro"; // For complex reasoning
+      modelPath = "models/gemini-2.5-pro"; 
     }
 
     const genModel = genAI.getGenerativeModel({ model: modelPath });
 
     const landmarkInfo = pois && pois.length > 0 
       ? pois.map((p: any) => p.name).join(", ") 
-      : "the local area";
+      : "the general history of this neighborhood";
 
-    const prompt = `You are a professional local historian. Narrate a 2-sentence story about ${landmarkInfo} in ${locationContext?.street || 'this area'}.`;
+    // ENHANCED PROMPT: Requests a specific format and a reference link
+    const prompt = `
+      You are a professional local historian. 
+      LOCATION: ${locationContext?.street || 'this area'}, ${locationContext?.city || ''}.
+      LANDMARKS: ${landmarkInfo}.
+
+      TASK: 
+      1. Provide a unique, fascinating 2-sentence historical fact. 
+      2. If this is a repeat request, find a different obscure detail or "hidden secret" about the area.
+      3. Provide a real external URL (Wikipedia, local museum, or historical archive) where the user can verify this.
+
+      OUTPUT FORMAT:
+      STORY: [Your 2-sentence narration here]
+      LINK: [Valid URL here]
+    `;
 
     const result = await genModel.generateContent(prompt);
     const text = result.response.text();
 
+    // We return the raw text to the frontend to be parsed
     return NextResponse.json({ text });
 
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     return NextResponse.json({ 
-      text: "The archive is currently unreachable.", 
+      text: "STORY: The archive is currently unreachable. LINK: https://google.com", 
       details: error.message 
     }, { status: 500 });
   }
