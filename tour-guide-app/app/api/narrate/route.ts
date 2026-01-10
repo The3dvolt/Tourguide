@@ -8,21 +8,24 @@ export async function POST(req: Request) {
 
     if (!activeKey) return NextResponse.json({ text: "Missing API Key" }, { status: 401 });
 
-    // CRITICAL FIX: Manually setting the API version to 'v1' (stable)
     const genAI = new GoogleGenerativeAI(activeKey);
     
-    // We explicitly call the model by its stable name
-    const modelName = model === "gemini-2.0-flash-exp" ? "gemini-2.0-flash-exp" : "gemini-1.5-flash";
+    // FIX: Using the absolute 'models/...' prefix 
+    // This is the most compatible way to call the API
+    let modelPath = "models/gemini-1.5-flash"; 
     
-    // Use the v1 stable endpoint configuration
-    const genModel = genAI.getGenerativeModel(
-      { model: modelName },
-      { apiVersion: 'v1' } 
-    );
+    if (model === "gemini-2.0-flash-exp") {
+      modelPath = "models/gemini-2.0-flash-exp";
+    } else if (model?.includes("pro")) {
+      modelPath = "models/gemini-1.5-pro";
+    }
+
+    // Initialize with the explicit path
+    const genModel = genAI.getGenerativeModel({ model: modelPath });
 
     const subjects = pois && pois.length > 0 
       ? pois.map((p: any) => p.name).join(", ") 
-      : "the local streets";
+      : "the local landscape";
 
     const prompt = `You are a local historian. Narrate a 2-sentence story about ${subjects} in ${locationContext?.street || 'this area'}.`;
 
@@ -34,6 +37,7 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Gemini Error:", error);
+    // Return detailed error to help us see if it's still a 404
     return NextResponse.json({ 
       text: "The archive is currently unreachable.", 
       details: error.message 
