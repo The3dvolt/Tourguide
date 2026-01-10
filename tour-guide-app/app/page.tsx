@@ -36,6 +36,9 @@ export default function TourGuidePage() {
   const [isMuted, setIsMuted] = useState(false);
   const [radius] = useState(5000); 
   
+  // New state for personal API key
+  const [userApiKey, setUserApiKey] = useState("");
+  
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash"); 
@@ -106,7 +109,7 @@ export default function TourGuidePage() {
     };
   }, [isMounted, pois.length, heading]);
 
-  // --- 3. POI Discovery (With Cooldown Loop Protection) ---
+  // --- 3. POI Discovery ---
   useEffect(() => {
     if (!location) return;
     
@@ -153,7 +156,8 @@ export default function TourGuidePage() {
         body: JSON.stringify({ 
           pois, 
           locationContext: { street: address }, 
-          model: selectedModel 
+          model: selectedModel,
+          customKey: userApiKey // Passing the key from state to backend
         })
       });
 
@@ -250,6 +254,18 @@ export default function TourGuidePage() {
         </div>
 
         <div className="w-full mt-4 space-y-2">
+          {/* New Personal API Key Input Box */}
+          <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
+            <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">Personal Uplink Key (Overrides Quota)</label>
+            <input 
+              type="password"
+              placeholder="Paste AIza... key here to bypass 429 error"
+              value={userApiKey}
+              onChange={(e) => setUserApiKey(e.target.value)}
+              className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none px-1 placeholder:text-zinc-700"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
              <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
                 <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">AI Brain</label>
