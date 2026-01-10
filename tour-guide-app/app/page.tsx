@@ -11,13 +11,18 @@ function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371e3; 
+  const R = 6371e3; // Earth radius in meters
   const φ1 = lat1 * Math.PI / 180;
   const φ2 = lat2 * Math.PI / 180;
   const Δφ = (lat2 - lat1) * Math.PI / 180;
   const Δλ = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
-  return Math.round(R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))));
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return Math.round(R * c);
 }
 
 export default function TourGuidePage() {
@@ -32,6 +37,8 @@ export default function TourGuidePage() {
   const [autoLoopActive, setAutoLoopActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(30);
   const [isMuted, setIsMuted] = useState(false);
+  
+  // Voice States
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   
@@ -51,14 +58,26 @@ export default function TourGuidePage() {
     loadVoices();
   }, [selectedVoiceURI]);
 
-  // --- 2. GPS & Compass Tracker (Gyro Movement) ---
+  // --- 2. Android & iOS Compass + GPS Logic ---
   useEffect(() => {
     const handleOrientation = (e: any) => {
-      // Logic for iOS (webkitCompassHeading) vs Android (alpha)
-      const compass = e.webkitCompassHeading || (360 - e.alpha);
-      if (compass !== undefined) setHeading(compass);
+      let compass = 0;
+      if (e.webkitCompassHeading) {
+        // iOS Device
+        compass = e.webkitCompassHeading;
+      } else if (e.alpha !== null) {
+        // Android Device (Subtract from 360 to sync clockwise rotation)
+        compass = 360 - e.alpha;
+      }
+      setHeading(compass);
     };
-    window.addEventListener('deviceorientation', handleOrientation, true);
+
+    // Listen for orientation (Standard and Android Absolute)
+    if ('ondeviceorientationabsolute' in window) {
+      window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    } else {
+      window.addEventListener('deviceorientation', handleOrientation, true);
+    }
 
     const watchId = navigator.geolocation.watchPosition((pos) => {
       const { latitude, longitude } = pos.coords;
@@ -72,13 +91,13 @@ export default function TourGuidePage() {
           const d = getDistance(latitude, longitude, tLat, tLon);
           setDistance(d);
           const bearing = getBearing(latitude, longitude, tLat, tLon);
-          // Rotation = Target direction - where phone is pointing
           setArrowRotation(bearing - heading);
         }
       }
     }, (err) => console.error(err), { enableHighAccuracy: true });
 
     return () => {
+      window.removeEventListener('deviceorientationabsolute', handleOrientation);
       window.removeEventListener('deviceorientation', handleOrientation);
       navigator.geolocation.clearWatch(watchId);
     };
@@ -99,7 +118,7 @@ export default function TourGuidePage() {
     });
   }, [location]);
 
-  // --- 4. Narration & Audio Trigger ---
+  // --- 4. Narration & Voice Trigger ---
   const handleNarrate = async () => {
     try {
       const res = await fetch('/api/narrate', {
@@ -112,7 +131,6 @@ export default function TourGuidePage() {
         })
       });
       const data = await res.json();
-      
       const parts = data.text.split(/LINK:/i);
       const story = parts[0].replace(/STORY:/i, '').trim();
       const link = parts[1]?.trim() || '';
@@ -131,7 +149,7 @@ export default function TourGuidePage() {
   };
 
   const toggleAutoTour = async () => {
-    // Request permission for compass on iOS
+    // Permission for iOS (Android will ignore this)
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
       await (DeviceOrientationEvent as any).requestPermission();
     }
@@ -146,7 +164,7 @@ export default function TourGuidePage() {
         });
       }, 1000);
     } else {
-      clearInterval(countdownIntervalRef.current!);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       window.speechSynthesis.cancel();
       setTimeLeft(30);
     }
@@ -161,16 +179,18 @@ export default function TourGuidePage() {
             {address}
           </p>
         </div>
-        <button onClick={() => setIsMuted(!isMuted)} className={`px-4 py-2 rounded-full text-[9px] font-black border uppercase transition-all ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
+        <button onClick={() => {
+          setIsMuted(!isMuted);
+          if (!isMuted) window.speechSynthesis.cancel();
+        }} className={`px-4 py-2 rounded-full text-[9px] font-black border uppercase transition-all ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
           {isMuted ? '🔇 Muted' : '🔊 Sound On'}
         </button>
       </header>
 
       <main className="flex-1 flex flex-col items-center">
-        {/* Real-time 3D Arrow Display */}
-        
+        {/* Navigation Display */}
         <div className="relative w-full aspect-square flex flex-col items-center justify-center">
-          <div style={{ perspective: '1000px' }} className="relative z-10">
+          <div style={{ perspective: '1200px' }} className="relative z-10">
             <div className="transition-transform duration-150 ease-linear" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
               <div className="w-28 h-28 text-lime-400 drop-shadow-[0_0_20px_rgba(163,230,53,1)]">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
@@ -191,16 +211,16 @@ export default function TourGuidePage() {
         {/* Story Display */}
         <div className={`w-full mt-2 p-6 rounded-[2.5rem] border-2 transition-all duration-700 relative ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
           <p className="text-zinc-100 text-lg font-medium italic text-center leading-snug">
-            {currentNarration || "Finding history at your coordinates..."}
+            {currentNarration || "Calibrating historical vectors..."}
           </p>
           {factCheckLink && (
-            <a href={factCheckLink} target="_blank" className="mt-4 mx-auto block w-max bg-lime-500 text-black px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg shadow-lime-500/20">
+            <a href={factCheckLink} target="_blank" className="mt-4 mx-auto block w-max bg-lime-500 text-black px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest">
               Verify Fact ↗
             </a>
           )}
         </div>
 
-        {/* Voice Selector & Controls */}
+        {/* Voice Selector & Test Button */}
         <div className="w-full mt-4 space-y-3">
           <div className="flex gap-2 bg-zinc-900 p-2 rounded-2xl border border-white/5">
             <select 
@@ -212,7 +232,7 @@ export default function TourGuidePage() {
             </select>
             <button 
               onClick={() => {
-                const u = new SpeechSynthesisUtterance("Audio active.");
+                const u = new SpeechSynthesisUtterance("System audio active.");
                 const v = voices.find(x => x.voiceURI === selectedVoiceURI);
                 if(v) u.voice = v;
                 window.speechSynthesis.speak(u);
