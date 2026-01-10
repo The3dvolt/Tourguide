@@ -12,15 +12,10 @@ function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371e3; 
-  const φ1 = lat1 * Math.PI / 180;
-  const φ2 = lat2 * Math.PI / 180;
-  const Δφ = (lat2 - lat1) * Math.PI / 180;
-  const Δλ = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
+  const φ1 = lat1 * Math.PI / 180; const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180; const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  return Math.round(R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))));
 }
 
 export default function TourGuidePage() {
@@ -33,12 +28,9 @@ export default function TourGuidePage() {
   const [currentNarration, setCurrentNarration] = useState('');
   const [autoLoopActive, setAutoLoopActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(120); 
-  const [isMuted, setIsMuted] = useState(false);
-  const [radius] = useState(5000); 
-  
-  // New state for personal API key
+  const [isMuted, setIsMuted] = useState(false); // Default Sound ON
+  const [radius, setRadius] = useState(5000); // Default High Value
   const [userApiKey, setUserApiKey] = useState("");
-  
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash"); 
@@ -47,74 +39,49 @@ export default function TourGuidePage() {
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastDiscoveryRef = useRef<number>(0); 
 
-  // --- 0. Hydration Guard ---
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
+  useEffect(() => { setIsMounted(true); }, []);
 
-  // --- 1. Audio Setup ---
   useEffect(() => {
     if (!isMounted) return;
     const loadVoices = () => {
       const v = window.speechSynthesis.getVoices();
       const engVoices = v.filter(voice => voice.lang.startsWith('en'));
       setVoices(engVoices);
-      if (engVoices.length > 0 && !selectedVoiceURI) {
-        setSelectedVoiceURI(engVoices[0].voiceURI);
-      }
+      if (engVoices.length > 0 && !selectedVoiceURI) setSelectedVoiceURI(engVoices[0].voiceURI);
     };
     window.speechSynthesis.onvoiceschanged = loadVoices;
     loadVoices();
   }, [isMounted, selectedVoiceURI]);
 
-  // --- 2. Sensors (GPS & Compass) ---
   useEffect(() => {
     if (!isMounted) return;
-
     const handleOrientation = (e: any) => {
-      let compass = 0;
-      if (e.webkitCompassHeading) {
-        compass = e.webkitCompassHeading;
-      } else if (e.alpha !== null) {
-        compass = 360 - e.alpha;
-      }
-      setHeading(compass);
+      setHeading(e.webkitCompassHeading || (360 - e.alpha) || 0);
     };
-
     window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-    window.addEventListener('deviceorientation', handleOrientation, true);
-
     const watchId = navigator.geolocation.watchPosition((pos) => {
       const { latitude, longitude } = pos.coords;
       setLocation({ lat: latitude, lon: longitude });
-
       if (pois.length > 0) {
         const target = pois[0];
         const tLat = target.lat || target.center?.lat;
         const tLon = target.lon || target.center?.lon;
-        
         if (tLat && tLon) {
-          const d = getDistance(latitude, longitude, tLat, tLon);
-          setDistance(d);
-          const bearing = getBearing(latitude, longitude, tLat, tLon);
-          setArrowRotation(bearing - heading);
+          setDistance(getDistance(latitude, longitude, tLat, tLon));
+          setArrowRotation(getBearing(latitude, longitude, tLat, tLon) - heading);
         }
       }
-    }, (err) => console.error(err), { enableHighAccuracy: true });
-
+    }, null, { enableHighAccuracy: true });
     return () => {
       window.removeEventListener('deviceorientationabsolute', handleOrientation);
-      window.removeEventListener('deviceorientation', handleOrientation);
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [isMounted, pois.length, heading]);
+  }, [isMounted, pois, heading]);
 
-  // --- 3. POI Discovery ---
   useEffect(() => {
     if (!location) return;
-    
     const now = Date.now();
-    if (now - lastDiscoveryRef.current < 20000) return; 
+    if (now - lastDiscoveryRef.current < 15000) return; 
     lastDiscoveryRef.current = now;
 
     fetch('/api/discover', {
@@ -124,83 +91,48 @@ export default function TourGuidePage() {
     })
     .then(res => res.json())
     .then(data => {
-      if (!data.pois || data.pois.length === 0) {
-        setPois([{ 
-            id: 'fallback', 
-            name: 'the local history of this neighborhood', 
-            lat: location.lat + 0.001, 
-            lon: location.lon + 0.001 
-        }]);
-      } else {
-        setPois(data.pois);
-      }
+      setPois(data.pois?.length > 0 ? data.pois : [{ name: 'local history', lat: location.lat+0.001, lon: location.lon+0.001 }]);
       if (data.locationContext?.street) setAddress(data.locationContext.street);
-    })
-    .catch(() => {
-        setAddress("Using offline vectors...");
-        setPois([{ id: 'offline', name: 'local architecture', lat: location.lat + 0.001, lon: location.lon + 0.001 }]);
     });
-  }, [location?.lat, location?.lon, radius]);
+  }, [location, radius]);
 
-  // --- 4. Narration Logic ---
+  const speakText = (text: string) => {
+    if (isMuted || typeof window === 'undefined') return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = voices.find(x => x.voiceURI === selectedVoiceURI);
+    if (v) u.voice = v;
+    window.speechSynthesis.speak(u);
+  };
+
   const handleNarrate = async () => {
-    if (pois.length === 0) {
-        setCurrentNarration("Waiting for satellite lock...");
-        return;
-    }
-
     try {
       const res = await fetch('/api/narrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          pois, 
-          locationContext: { street: address }, 
-          model: selectedModel,
-          customKey: userApiKey // Passing the key from state to backend
-        })
+        body: JSON.stringify({ pois, locationContext: { street: address }, model: selectedModel, customKey: userApiKey })
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || "API Error");
-
-      const cleanText = data.text.replace(/STORY:|LINK:|LINKEDIN:|VERIFY:/gi, '').trim();
-      setCurrentNarration(cleanText);
-
-      if (!isMuted && typeof window !== 'undefined') {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(cleanText);
-        const v = voices.find(x => x.voiceURI === selectedVoiceURI);
-        if (v) u.voice = v;
-        window.speechSynthesis.speak(u);
-      }
-    } catch (e: any) { 
-      setCurrentNarration(`Archive error: ${e.message || "Connection lost"}`);
-    }
+      setCurrentNarration(data.text);
+      speakText(data.text);
+    } catch (e: any) { setCurrentNarration(`Error: ${e.message}`); }
   };
 
   const toggleAutoTour = async () => {
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
-      try { await (DeviceOrientationEvent as any).requestPermission(); } catch (e) { console.warn(e); }
+      try { await (DeviceOrientationEvent as any).requestPermission(); } catch (e) {}
     }
-    
     const start = !autoLoopActive;
     setAutoLoopActive(start);
-    
     if (start) {
       handleNarrate();
       countdownIntervalRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) { 
-            handleNarrate(); 
-            return 120; 
-          }
-          return prev - 1;
-        });
+        setTimeLeft((prev) => { if (prev <= 1) { handleNarrate(); return 120; } return prev - 1; });
       }, 1000);
     } else {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-      if (typeof window !== 'undefined') window.speechSynthesis.cancel();
+      window.speechSynthesis.cancel();
       setTimeLeft(120);
     }
   };
@@ -211,87 +143,69 @@ export default function TourGuidePage() {
     <div className="flex flex-col min-h-screen bg-black text-white p-4 max-w-lg mx-auto font-sans overflow-hidden">
       <header className="flex justify-between items-start mb-4">
         <div className="flex-1">
-          <h1 className="font-black text-lime-500 text-xl italic tracking-tighter uppercase leading-none">3D VOLT TOUR</h1>
-          <p className="text-white font-bold text-[10px] mt-1 uppercase tracking-widest bg-zinc-900 w-fit px-2 py-0.5 rounded">
+          <h1 className="font-black text-lime-500 text-xl italic uppercase tracking-tighter">3D VOLT TOUR</h1>
+          <p className="text-white font-bold text-[10px] mt-1 uppercase bg-zinc-900 px-2 py-0.5 rounded italic">
             {address}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1">
-            <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-tighter">POIS: {pois.length} FOUND</span>
-            <button onClick={() => {
-              setIsMuted(!isMuted);
-              if (!isMuted) window.speechSynthesis.cancel();
-            }} className={`px-4 py-2 rounded-full text-[9px] font-black border uppercase transition-all ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
-              {isMuted ? '🔇 Muted' : '🔊 Sound On'}
-            </button>
+        <div className="flex flex-col items-end gap-2">
+          <button className="text-[9px] font-black bg-white text-black px-3 py-1 rounded-full uppercase">Google Login</button>
+          <button onClick={() => { setIsMuted(!isMuted); if (!isMuted) window.speechSynthesis.cancel(); }} 
+            className={`px-4 py-1.5 rounded-full text-[9px] font-black border uppercase ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
+            {isMuted ? '🔇 Muted' : '🔊 Sound On'}
+          </button>
         </div>
       </header>
 
       <main className="flex-1 flex flex-col items-center">
         <div className="relative w-full aspect-square flex flex-col items-center justify-center">
-          <div style={{ perspective: '1200px' }} className="relative z-10">
-            <div className="transition-transform duration-150 ease-linear" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
-              <div className="w-28 h-28 text-lime-400 drop-shadow-[0_0_20px_rgba(163,230,53,1)]">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="18 15 12 9 6 15" /><polyline points="18 9 12 3 6 9" />
-                </svg>
+          <div className="transition-transform duration-150 ease-linear" style={{ transform: `rotateX(60deg) rotateZ(${arrowRotation}deg)` }}>
+            <div className="w-24 h-24 text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,1)]">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><polyline points="18 15 12 9 6 15" /><polyline points="18 9 12 3 6 9" /></svg>
+            </div>
+          </div>
+          <p className="text-6xl font-mono font-black mt-4 tabular-nums">{distance ?? '--'}m</p>
+          <p className="text-[10px] font-black text-lime-500 uppercase tracking-widest">Target Proximity</p>
+        </div>
+
+        <div className={`w-full p-6 rounded-[2.5rem] border-2 transition-all min-h-[120px] flex items-center justify-center ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
+          <p className="text-zinc-100 text-center italic">{currentNarration || "Stand by for historical uplink..."}</p>
+        </div>
+
+        <div className="w-full mt-4 space-y-3">
+          <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
+            <label className="text-[8px] uppercase font-black text-lime-500 block mb-1">Personal API Key</label>
+            <input type="password" value={userApiKey} onChange={(e) => setUserApiKey(e.target.value)} placeholder="AIza..." className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none"/>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
+              <label className="text-[8px] uppercase font-black text-lime-500 block mb-1">AI Model</label>
+              <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-3-flash">Gemini 3 Flash</option>
+              </select>
+            </div>
+            <div className="bg-zinc-900 p-2 rounded-xl border border-white/5 relative">
+              <label className="text-[8px] uppercase font-black text-lime-500 block mb-1">Narrator</label>
+              <div className="flex items-center gap-1">
+                <select value={selectedVoiceURI} onChange={(e) => setSelectedVoiceURI(e.target.value)} className="flex-1 bg-transparent text-[10px] font-bold text-zinc-300 outline-none truncate">
+                  {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+                </select>
+                <button onClick={() => speakText("Testing system audio.")} className="text-[10px] bg-lime-500 text-black px-1 rounded font-bold">TEST</button>
               </div>
             </div>
           </div>
 
-          <div className="mt-8 text-center">
-            <p className="text-6xl font-mono font-black tabular-nums tracking-tighter">
-              {distance !== null ? `${distance}m` : '--'}
-            </p>
-            <p className="text-[10px] font-black text-lime-500 uppercase tracking-[0.5em]">Target Proximity</p>
-          </div>
-        </div>
-
-        <div className={`w-full mt-2 p-6 rounded-[2.5rem] border-2 transition-all duration-700 relative min-h-[140px] flex flex-col justify-center ${autoLoopActive ? 'border-lime-500 bg-lime-500/5' : 'border-white/5 bg-zinc-900/50'}`}>
-          <p className="text-zinc-100 text-lg font-medium italic text-center leading-snug">
-            {currentNarration || "Calibrating historical vectors..."}
-          </p>
-        </div>
-
-        <div className="w-full mt-4 space-y-2">
-          {/* New Personal API Key Input Box */}
-          <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
-            <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">Personal Uplink Key (Overrides Quota)</label>
-            <input 
-              type="password"
-              placeholder="Paste AIza... key here to bypass 429 error"
-              value={userApiKey}
-              onChange={(e) => setUserApiKey(e.target.value)}
-              className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none px-1 placeholder:text-zinc-700"
-            />
+          <div className="bg-zinc-900 p-3 rounded-xl border border-white/5">
+            <div className="flex justify-between mb-1">
+               <label className="text-[8px] uppercase font-black text-lime-500">Radar Range</label>
+               <span className="text-[8px] font-bold">{radius}M</span>
+            </div>
+            <input type="range" min="500" max="10000" step="500" value={radius} onChange={(e) => setRadius(parseInt(e.target.value))} className="w-full accent-lime-500" />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-             <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
-                <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">AI Brain</label>
-                <select 
-                  value={selectedModel} 
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none"
-                >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Stable)</option>
-                  <option value="gemini-3-flash">Gemini 3 Flash (Fast)</option>
-                </select>
-             </div>
-
-             <div className="bg-zinc-900 p-2 rounded-xl border border-white/5">
-                <label className="text-[8px] uppercase font-black text-lime-500 block mb-1 ml-1">Voice Tone</label>
-                <select 
-                  value={selectedVoiceURI} 
-                  onChange={(e) => setSelectedVoiceURI(e.target.value)}
-                  className="w-full bg-transparent text-[10px] font-bold text-zinc-300 outline-none truncate"
-                >
-                  {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
-                </select>
-             </div>
-          </div>
-
-          <button onClick={toggleAutoTour} className={`w-full py-6 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600 shadow-xl' : 'bg-lime-500 text-black shadow-2xl shadow-lime-500/40'}`}>
+          <button onClick={toggleAutoTour} className={`w-full py-5 rounded-full font-black text-xl uppercase tracking-tighter transition-all ${autoLoopActive ? 'bg-red-600' : 'bg-lime-500 text-black'}`}>
             {autoLoopActive ? `Stop (${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})` : 'Begin Discovery'}
           </button>
         </div>

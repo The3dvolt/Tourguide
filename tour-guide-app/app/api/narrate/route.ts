@@ -5,36 +5,38 @@ export async function POST(req: Request) {
   try {
     const { pois, locationContext, model, customKey } = await req.json();
 
-    // 1. Check for User Key first, then fall back to Server Key
+    // Priority: 1. User's Personal Key -> 2. Server's Vercel Key
     const activeKey = customKey || process.env.GEMINI_API_KEY;
 
     if (!activeKey) {
-      return NextResponse.json({ text: "No active Uplink found. Please enter an API Key." }, { status: 401 });
+      return NextResponse.json({ text: "API Uplink missing. Enter a Personal Key." }, { status: 401 });
     }
 
     const genAI = new GoogleGenerativeAI(activeKey);
     
-    // 2. Use the modern 2.5/3.0 model paths to avoid 404s
-    const modelPath = model || "models/gemini-2.5-flash"; 
+    // Default to 2.5 Flash if none selected; ensure 'models/' prefix
+    const modelPath = model?.includes('models/') ? model : `models/${model || 'gemini-2.5-flash'}`;
     
     const genModel = genAI.getGenerativeModel(
       { model: modelPath },
       { apiVersion: 'v1' } 
     );
 
-    const prompt = `You are a local historian. Narrate a 2-sentence story about ${pois[0]?.name || 'this area'} in ${locationContext?.city || 'this city'}.`;
+    const subjects = pois?.length > 0 
+      ? pois.slice(0, 3).map((p: any) => p.name).join(", ") 
+      : "the local landscape";
+
+    const prompt = `You are a professional local historian. Tell a fascinating 2-sentence story about ${subjects} in ${locationContext?.street || 'this area'}. Speak directly to the traveler.`;
 
     const result = await genModel.generateContent(prompt);
-    return NextResponse.json({ text: result.response.text() });
+    const text = result.response.text();
 
+    return NextResponse.json({ text });
   } catch (error: any) {
-    // If we hit a 429, tell the user clearly
-    if (error.message.includes("429")) {
-      return NextResponse.json({ 
-        text: "Uplink saturated. Please wait 60 seconds or use a Personal API Key.",
-        details: error.message 
-      }, { status: 429 });
-    }
-    return NextResponse.json({ text: "Archive error.", details: error.message }, { status: 500 });
+    console.error("Narrate Error:", error);
+    return NextResponse.json({ 
+      text: "The historical archive is currently obscured.", 
+      details: error.message 
+    }, { status: 500 });
   }
 }
