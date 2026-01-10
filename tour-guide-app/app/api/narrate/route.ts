@@ -8,33 +8,32 @@ export async function POST(req: Request) {
 
     if (!activeKey) return NextResponse.json({ text: "Missing API Key" }, { status: 401 });
 
+    // CRITICAL FIX: Manually setting the API version to 'v1' (stable)
     const genAI = new GoogleGenerativeAI(activeKey);
     
-    // FIX: Using the '-latest' or '-002' suffix forces the SDK to find the correct endpoint
-    let modelName = "gemini-1.5-flash-latest"; 
+    // We explicitly call the model by its stable name
+    const modelName = model === "gemini-2.0-flash-exp" ? "gemini-2.0-flash-exp" : "gemini-1.5-flash";
     
-    if (model === "gemini-2.0-flash-exp") {
-      modelName = "gemini-2.0-flash-exp";
-    } else if (model === "gemini-1.5-pro") {
-      modelName = "gemini-1.5-pro-latest";
-    }
+    // Use the v1 stable endpoint configuration
+    const genModel = genAI.getGenerativeModel(
+      { model: modelName },
+      { apiVersion: 'v1' } 
+    );
 
-    const genModel = genAI.getGenerativeModel({ model: modelName });
-
-    // Build the story context
     const subjects = pois && pois.length > 0 
       ? pois.map((p: any) => p.name).join(", ") 
-      : "the local area";
+      : "the local streets";
 
-    const prompt = `You are a local historian. Tell a fascinating 2-sentence story about ${subjects} near ${locationContext?.street || 'this location'}. Speak directly to the traveler.`;
+    const prompt = `You are a local historian. Narrate a 2-sentence story about ${subjects} in ${locationContext?.street || 'this area'}.`;
 
     const result = await genModel.generateContent(prompt);
-    const text = result.response.text();
+    const response = await result.response;
+    const text = response.text();
 
     return NextResponse.json({ text });
 
   } catch (error: any) {
-    console.error("Narrate Error:", error);
+    console.error("Gemini Error:", error);
     return NextResponse.json({ 
       text: "The archive is currently unreachable.", 
       details: error.message 
