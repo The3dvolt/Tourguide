@@ -4,7 +4,6 @@ import { NextResponse } from 'next/server';
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
 
 export async function POST(req: Request) {
-  // 1. Declare the variable outside so the catch block can see it
   let locationContext: any = null;
 
   try {
@@ -34,3 +33,6 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error("Narration error:", error);
+    const cityName = locationContext?.city || "this city";
+    return NextResponse.json({ 
+      text: `I'm currently observing the surroundings in ${cityName}. It's a fascinating area with a rich local history that I'm excited to share with you...`
