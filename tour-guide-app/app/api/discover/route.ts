@@ -1,59 +1,41 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
     const { lat, lon, radius = 5000 } = await req.json();
 
-    // This query looks for Historic sites, Tourism attractions, 
-    // AND general Buildings or Amenities if the others aren't found.
-    const query = `
-      [out:json][timeout:25];
-      (
-        node["historic"](around:${radius},${lat},${lon});
-        way["historic"](around:${radius},${lat},${lon});
-        node["tourism"](around:${radius},${lat},${lon});
-        node["amenity"~"place_of_worship|museum|arts_centre|cafe"](around:${radius},${lat},${lon});
-        node["building"~"church|cathedral|government|palace"](around:${radius},${lat},${lon});
-      );
-      out body center 15;
-    `;
+    // 1. Try the main OpenStreetMap/Overpass API
+    const query = `[out:json][timeout:10];node(around:${radius},${lat},${lon})["historic"];out 10;`;
+    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'User-Agent': '3D-Volt-Tour-App/1.0' },
-      body: `data=${encodeURIComponent(query)}`,
-    });
-
-    if (!response.ok) throw new Error('Overpass API not responding');
-    
-    const data = await response.json();
-    
-    // Map the results and ensure we have names
-    const pois = data.elements?.map((el: any) => ({
-      id: el.id,
-      name: el.tags.name || el.tags.historic || el.tags.amenity || "Notable Structure",
-      type: el.tags.historic || el.tags.tourism || "landmark"
-    })) || [];
-
-    // Get the address for street-level context
-    const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`, {
-       headers: { 'User-Agent': '3D-Volt-Tour-App/1.0' }
-    });
-    const geoData = await geoRes.json();
-
-    return NextResponse.json({ 
-      pois, 
-      locationContext: {
-        street: geoData.address?.road || "this area",
-        city: geoData.address?.city || geoData.address?.town || "Local District"
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.elements && data.elements.length > 0) {
+          return NextResponse.json({ 
+            pois: data.elements.map((e: any) => ({ name: e.tags.name || "Historic Site", lat: e.lat, lon: e.lon })),
+            locationContext: { street: "Historic District" }
+          });
+        }
       }
+    } catch (e) {
+      console.error("Overpass timeout, switching to fallback.");
+    }
+
+    // 2. FALLBACK: If Overpass fails, we provide a "Generic" point so the AI still works
+    // This ensures your app NEVER shows 0 POIs
+    return NextResponse.json({
+      pois: [{ 
+        id: 'fallback', 
+        name: 'the local neighborhood and its hidden stories', 
+        lat: lat + 0.001, 
+        lon: lon + 0.001 
+      }],
+      locationContext: { street: "Current Location" }
     });
+
   } catch (error: any) {
-    console.error("Discover Error:", error);
-    // Return a fallback so the app doesn't crash
-    return NextResponse.json({ 
-      pois: [], 
-      locationContext: { street: "this area", city: "Local" } 
-    });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
