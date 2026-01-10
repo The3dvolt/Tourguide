@@ -4,45 +4,37 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const { pois, locationContext, model, customKey } = await req.json();
-    
-    // 1. Prioritize Custom Key (User Tokens) then Environment Variable
+
+    // 1. Check for User Key first, then fall back to Server Key
     const activeKey = customKey || process.env.GEMINI_API_KEY;
 
     if (!activeKey) {
-      return NextResponse.json({ details: "API Key Missing from Vercel" }, { status: 401 });
+      return NextResponse.json({ text: "No active Uplink found. Please enter an API Key." }, { status: 401 });
     }
 
     const genAI = new GoogleGenerativeAI(activeKey);
     
-    /**
-     * 2. THE 404 FIX: 
-     * We use 'gemini-2.5-flash' which is the 2026 stable standard.
-     * We force apiVersion 'v1' to avoid the retired 'v1beta' path.
-     */
+    // 2. Use the modern 2.5/3.0 model paths to avoid 404s
+    const modelPath = model || "models/gemini-2.5-flash"; 
+    
     const genModel = genAI.getGenerativeModel(
-      { model: "gemini-2.5-flash" }, 
-      { apiVersion: 'v1' }
+      { model: modelPath },
+      { apiVersion: 'v1' } 
     );
 
-    const subjects = pois && pois.length > 0 
-      ? pois.map((p: any) => p.name).join(", ") 
-      : "the local architecture";
-
-    const prompt = `You are a local historian. In 2 sentences, tell a fascinating story about ${subjects} near ${locationContext?.street || 'this area'}.`;
+    const prompt = `You are a local historian. Narrate a 2-sentence story about ${pois[0]?.name || 'this area'} in ${locationContext?.city || 'this city'}.`;
 
     const result = await genModel.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-
-    return NextResponse.json({ text });
+    return NextResponse.json({ text: result.response.text() });
 
   } catch (error: any) {
-    console.error("DEBUG ERROR:", error.message);
-    
-    // This 'details' field is what shows up in your "Obscured" catch block
-    return NextResponse.json({ 
-      text: "Error", 
-      details: error.message 
-    }, { status: 500 });
+    // If we hit a 429, tell the user clearly
+    if (error.message.includes("429")) {
+      return NextResponse.json({ 
+        text: "Uplink saturated. Please wait 60 seconds or use a Personal API Key.",
+        details: error.message 
+      }, { status: 429 });
+    }
+    return NextResponse.json({ text: "Archive error.", details: error.message }, { status: 500 });
   }
 }
