@@ -1,3 +1,10 @@
+I have analyzed your code. The reason for the constant flashing and the "Obscured" error is a looping re-fetch in your useEffect. Every time a POI is found, the state updates, which triggers the effect again, causing a never-ending cycle that eventually hits your API limit.
+
+I have added a Ref-based cooldown and a hard-coded fallback inside the frontend to ensure that even if your backend or the external Overpass API fails, the app still has "Virtual Vectors" to narrate.
+
+🛠️ The Fixed app/page.tsx
+TypeScript
+
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -42,6 +49,7 @@ export default function TourGuidePage() {
   const [isMounted, setIsMounted] = useState(false);
 
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastDiscoveryRef = useRef<number>(0); // Prevents the flashing loop
 
   // --- 0. Hydration Guard ---
   useEffect(() => {
@@ -77,11 +85,8 @@ export default function TourGuidePage() {
       setHeading(compass);
     };
 
-    if ('ondeviceorientationabsolute' in window) {
-      window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-    } else {
-      window.addEventListener('deviceorientation', handleOrientation, true);
-    }
+    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
 
     const watchId = navigator.geolocation.watchPosition((pos) => {
       const { latitude, longitude } = pos.coords;
@@ -89,8 +94,8 @@ export default function TourGuidePage() {
 
       if (pois.length > 0) {
         const target = pois[0];
-        const tLat = target.lat || target.center?.lat || (target.lat);
-        const tLon = target.lon || target.center?.lon || (target.lon);
+        const tLat = target.lat || target.center?.lat;
+        const tLon = target.lon || target.center?.lon;
         
         if (tLat && tLon) {
           const d = getDistance(latitude, longitude, tLat, tLon);
@@ -106,11 +111,17 @@ export default function TourGuidePage() {
       window.removeEventListener('deviceorientation', handleOrientation);
       navigator.geolocation.clearWatch(watchId);
     };
-  }, [isMounted, pois, heading]);
+  }, [isMounted, pois.length, heading]); // Removed full 'pois' to stop unnecessary triggers
 
-  // --- 3. POI Discovery ---
+  // --- 3. POI Discovery (With Loop Protection) ---
   useEffect(() => {
     if (!location) return;
+    
+    // Cooldown: Only fetch once every 20 seconds to stop the flashing
+    const now = Date.now();
+    if (now - lastDiscoveryRef.current < 20000) return; 
+    lastDiscoveryRef.current = now;
+
     fetch('/api/discover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -119,16 +130,31 @@ export default function TourGuidePage() {
     .then(res => res.json())
     .then(data => {
       if (!data.pois || data.pois.length === 0) {
-        setPois([{ id: 'fallback', name: 'the local urban architecture', lat: location.lat + 0.001, lon: location.lon + 0.001 }]);
+        // Essential Fallback POI
+        setPois([{ 
+            id: 'fallback', 
+            name: 'the local history of this neighborhood', 
+            lat: location.lat + 0.001, 
+            lon: location.lon + 0.001 
+        }]);
       } else {
         setPois(data.pois);
       }
       if (data.locationContext?.street) setAddress(data.locationContext.street);
-    }).catch(() => setAddress("Connection weak..."));
-  }, [location, radius]);
+    })
+    .catch(() => {
+        setAddress("Using offline vectors...");
+        setPois([{ id: 'offline', name: 'local architecture', lat: location.lat + 0.001, lon: location.lon + 0.001 }]);
+    });
+  }, [location?.lat, location?.lon, radius]);
 
   // --- 4. Narration Logic ---
   const handleNarrate = async () => {
+    if (pois.length === 0) {
+        setCurrentNarration("Waiting for satellite lock...");
+        return;
+    }
+
     try {
       const res = await fetch('/api/narrate', {
         method: 'POST',
@@ -153,9 +179,8 @@ export default function TourGuidePage() {
         if (v) u.voice = v;
         window.speechSynthesis.speak(u);
       }
-    } catch (e) { 
-      setCurrentNarration("Historical vectors currently obscured.");
-      console.error(e); 
+    } catch (e: any) { 
+      setCurrentNarration(`Archive error: ${e.message || "Connection lost"}`);
     }
   };
 
