@@ -5,29 +5,29 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || '');
 
 export async function POST(req: Request) {
   try {
-    const { pois, locationContext } = await req.json();
+    const { pois, locationContext, userEmail } = await req.json();
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // Focus on the first/closest POI if it exists
-    const primaryPOI = pois && pois.length > 0 ? pois[0].name : null;
-
     const prompt = `
-      You are an elite AI Historian and Tour Guide. 
-      Location: ${locationContext?.fullAddress || 'Gatineau/Ottawa region'}.
-      Primary Landmark Detected: ${primaryPOI || 'None'}.
-      All Nearby Markers: ${JSON.stringify(pois)}.
+      CONTEXT: You are a high-end AI historian for the 3D Volt Tour app.
+      LOCATION: ${locationContext.fullAddress} (Street: ${locationContext.street}, City: ${locationContext.city}).
+      MARKERS DETECTED: ${JSON.stringify(pois)}.
 
-      INSTRUCTIONS:
-      1. If a specific landmark like "${primaryPOI}" is detected, start by telling its specific history, why it is famous, and what a visitor should look for.
-      2. If no markers are found, use your internal Wikipedia-level knowledge to talk about the history of ${locationContext?.street || 'this street'} and ${locationContext?.city || 'this city'}.
-      3. Talk about the local culture, famous news archives from ${locationContext?.state}, and architectural styles.
-      4. ALWAYS provide content. NEVER say you don't know.
-      5. Keep the tone exciting and professional. Use 3 clear paragraphs.
+      TASK:
+      1. If specific markers like "Vintage Wings of Canada" are detected, provide a deep, 3-paragraph history of that specific place.
+      2. If NO markers are detected, use your internal Wikipedia and news archive training to talk about the history of ${locationContext.street} and the city of ${locationContext.city}.
+      3. Talk about the architectural style of this neighborhood and any famous news stories from this province.
+      4. NEVER say you don't know. Always provide a rich historical narrative.
     `;
 
     const result = await model.generateContent(prompt);
-    return NextResponse.json({ text: result.response.text() });
+    const text = result.response.text();
+
+    // OPTIONAL: Save to Database here using userEmail
+    // await supabase.from('history').insert({ email: userEmail, story: text, location: locationContext.city });
+
+    return NextResponse.json({ text });
   } catch (error) {
-    return NextResponse.json({ text: "I'm accessing the local historical archives. This area has a fascinating story tied to the heritage of the region..." });
+    return NextResponse.json({ text: "Observing local history..." });
   }
 }
