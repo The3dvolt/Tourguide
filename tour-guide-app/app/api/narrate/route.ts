@@ -35,4 +35,7 @@ export async function POST(req: Request) {
     console.error("Narration error:", error);
     const cityName = locationContext?.city || "this city";
     return NextResponse.json({ 
-      text: `I'm currently observing the surroundings in ${cityName}. It's a fascinating area with a rich local history that I'm excited to share with you...`
+      text: `I'm currently observing the surroundings in ${cityName}. It's a fascinating area with a rich local history that I'm excited to share with you...` 
+    });
+  }
+}
