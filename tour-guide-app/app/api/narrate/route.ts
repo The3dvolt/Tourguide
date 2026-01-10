@@ -4,28 +4,33 @@ import { NextResponse } from 'next/server';
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
 
 export async function POST(req: Request) {
+  // 1. Declare the variable outside so the catch block can see it
+  let locationContext: any = null;
+
   try {
-    const { pois, locationContext, interests } = await req.json();
+    const body = await req.json();
+    const { pois, interests } = body;
+    locationContext = body.locationContext;
+
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
-      You are an expert AI Tour Guide. The user is at: ${locationContext.fullAddress}.
-      Current Street/Neighborhood: ${locationContext.street}.
-      City: ${locationContext.city}. State/Province: ${locationContext.state}.
+      You are an expert AI Tour Guide. The user is at: ${locationContext?.fullAddress || 'their current location'}.
+      Current Street/Neighborhood: ${locationContext?.street || 'this area'}.
+      City: ${locationContext?.city || 'the local city'}. State/Province: ${locationContext?.state || 'the region'}.
 
       INSTRUCTIONS:
       - NEVER say "I don't have info." 
-      - If no landmarks (POIs) are provided, talk about the history of ${locationContext.street} and the architectural style of ${locationContext.city}.
+      - If no landmarks (POIs) are provided, talk about the history of ${locationContext?.street || 'the area'} and the architectural style of ${locationContext?.city || 'the city'}.
       - Look into your internal records for news archives, historical events, or the industrial heritage of this specific sector.
       - Talk about the typical stores and the "vibe" of this neighborhood.
-      - Mention ${locationContext.state}'s general historical significance.
+      - Mention ${locationContext?.state || 'the province'}'s general historical significance.
       - Be a storyteller. If you detect markers: ${JSON.stringify(pois)}, include them.
-      - Focus on interests: ${interests.join(", ")}.
+      - Focus on interests: ${interests?.join(", ") || 'local culture'}.
     `;
 
     const result = await model.generateContent(prompt);
     return NextResponse.json({ text: result.response.text() });
+
   } catch (error) {
-    return NextResponse.json({ text: "I'm looking at the history of " + locationContext?.city + " right now. This area has deep roots..." });
-  }
-}
+    console.error("Narration error:", error);
