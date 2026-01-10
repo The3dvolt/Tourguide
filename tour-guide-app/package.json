@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
+    "@supabase/supabase-js": "^2.90.1",
     "next": "^15.1.0",
     "next-auth": "^4.24.13",
     "react": "^19.0.0",
