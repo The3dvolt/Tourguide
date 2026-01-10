@@ -1,34 +1,23 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { NextResponse } from "next/server";
-
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { pois, locationContext } = body;
+    const { pois, locationContext, model, customKey } = await req.json();
 
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ text: "API Key missing", details: "Key not found in Vercel Env" }, { status: 500 });
+    // Priority: 1. User's Key -> 2. Developer's Key
+    const activeKey = customKey || process.env.GEMINI_API_KEY;
+
+    if (!activeKey) {
+      return NextResponse.json({ text: "No API Key provided." }, { status: 401 });
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    const genAI = new GoogleGenerativeAI(activeKey);
+    // Use the model selected by the user in the UI
+    const genModel = genAI.getGenerativeModel({ model: model || "gemini-1.5-flash" });
 
-    // Validate that we actually have data to send to Gemini
-    if (!locationContext && (!pois || pois.length === 0)) {
-       return NextResponse.json({ text: "No location data", details: "Phone sent empty GPS context" }, { status: 400 });
-    }
-
-    const prompt = `Historian guide. Location: ${locationContext?.city}. Landmarks: ${pois?.map((p:any) => p.name).join(', ')}. 2 sentences of history.`;
-
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-
-    return NextResponse.json({ text });
+    const prompt = `Historian guide...`; // (Keep your existing prompt)
+    const result = await genModel.generateContent(prompt);
+    
+    return NextResponse.json({ text: result.response.text() });
   } catch (error: any) {
-    console.error(error);
-    return NextResponse.json({ 
-      text: "Archive Error", 
-      details: error.message // This sends the real error to your phone!
-    }, { status: 500 });
+    return NextResponse.json({ text: "Error", details: error.message }, { status: 500 });
   }
 }
