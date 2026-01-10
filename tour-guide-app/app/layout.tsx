@@ -1,22 +1,10 @@
-
-// ============================================
-// FILE: app/layout.tsx
-// Replace existing file
-// ============================================
-import type { Metadata } from 'next';
-import './globals.css';
+import type { Metadata } from "next";
+import "./globals.css";
+import AuthProvider from "./components/AuthProvider";
 
 export const metadata: Metadata = {
-  title: 'AI Tour Guide - Your Personal Travel Companion',
-  description: 'Discover interesting places around you with AI-powered narration',
-  manifest: '/manifest.json',
-  themeColor: '#2563eb',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'AI Tour Guide'
-  }
+  title: "3D Volt Tour Guide",
+  description: "AI Powered Tour Guide",
 };
 
 export default function RootLayout({
@@ -26,7 +14,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }
