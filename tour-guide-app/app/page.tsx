@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import MiniMap from './components/MiniMap';
+import MiniMap from './MiniMap';
 
 // --- Math Helpers ---
 function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
