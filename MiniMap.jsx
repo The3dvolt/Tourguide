@@ -20,7 +20,13 @@ export default function MiniMap() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  if (!position) return null;
+  if (!position) {
+    return (
+      <div className="fixed top-4 right-4 w-[100px] h-[100px] z-50 border-2 border-white shadow-lg rounded-lg overflow-hidden bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+        Locating...
+      </div>
+    );
+  }
 
   // Calculate bounding box for the map view
   const delta = 0.002;

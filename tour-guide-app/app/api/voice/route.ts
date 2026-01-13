@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const { text } = await req.json();
+    const { text, voiceId, ssmlGender } = await req.json();
     
     if (!text) {
       return NextResponse.json({ error: 'No text provided' }, { status: 400 });
@@ -24,8 +24,8 @@ export async function POST(req: NextRequest) {
           input: { text },
           voice: {
             languageCode: 'en-US',
-            name: 'en-US-Journey-F', // Natural female voice for tour guide
-            ssmlGender: 'FEMALE'
+            name: voiceId || 'en-US-Journey-F', // Default to Journey (Gemini-like)
+            ssmlGender: ssmlGender || 'FEMALE'
           },
           audioConfig: {
             audioEncoding: 'MP3',

@@ -18,6 +18,13 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   return Math.round(R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))));
 }
 
+const GEMINI_VOICES = [
+  { name: 'Journey (Female)', voiceURI: 'en-US-Journey-F', gender: 'FEMALE' },
+  { name: 'Journey (Male)', voiceURI: 'en-US-Journey-D', gender: 'MALE' },
+  { name: 'Standard (Female)', voiceURI: 'en-US-Standard-C', gender: 'FEMALE' },
+  { name: 'Standard (Male)', voiceURI: 'en-US-Standard-D', gender: 'MALE' },
+];
+
 export default function TourGuidePage() {
   const [location, setLocation] = useState<{lat: number, lon: number} | null>(null);
   const [address, setAddress] = useState("Locating street...");
@@ -31,7 +38,7 @@ export default function TourGuidePage() {
   const [isMuted, setIsMuted] = useState(false);
   const [radius, setRadius] = useState(5000); 
   const [userApiKey, setUserApiKey] = useState("");
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voices, setVoices] = useState<any[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash"); 
   const [isMounted, setIsMounted] = useState(false);
@@ -39,21 +46,18 @@ export default function TourGuidePage() {
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastDiscoveryRef = useRef<number>(0); 
   const lastReverseGeocodeRef = useRef<number>(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => { setIsMounted(true); }, []);
 
   // 🔊 Audio Setup
   useEffect(() => {
     if (!isMounted) return;
-    const loadVoices = () => {
-      const v = window.speechSynthesis.getVoices();
-      const engVoices = v.filter(voice => voice.lang.startsWith('en'));
-      setVoices(engVoices);
-      if (engVoices.length > 0 && !selectedVoiceURI) setSelectedVoiceURI(engVoices[0].voiceURI);
-    };
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    loadVoices();
-  }, [isMounted, selectedVoiceURI]);
+    setVoices(GEMINI_VOICES);
+    if (!selectedVoiceURI) {
+      setSelectedVoiceURI(GEMINI_VOICES[0].voiceURI);
+    }
+  }, [isMounted]);
 
   // 🧭 Real-Time Sensor Tracking & Reverse Geocoding
   useEffect(() => {
@@ -122,13 +126,27 @@ export default function TourGuidePage() {
     });
   }, [location, radius]);
 
-  const speakText = (text: string) => {
+  const speakText = async (text: string) => {
     if (isMuted || typeof window === 'undefined') return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    const v = voices.find(x => x.voiceURI === selectedVoiceURI);
-    if (v) u.voice = v;
-    window.speechSynthesis.speak(u);
+    
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    try {
+      const selectedVoice = voices.find(v => v.voiceURI === selectedVoiceURI) || GEMINI_VOICES[0];
+      const res = await fetch('/api/voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceId: selectedVoice.voiceURI, ssmlGender: selectedVoice.gender })
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play();
+    } catch (e) { console.error("TTS Error", e); }
   };
 
   const handleNarrate = async () => {
@@ -163,6 +181,7 @@ export default function TourGuidePage() {
     } else {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       window.speechSynthesis.cancel();
+      if (audioRef.current) audioRef.current.pause();
       setTimeLeft(120);
     }
   };
@@ -181,7 +200,7 @@ export default function TourGuidePage() {
         </div>
         <div className="flex flex-col items-end gap-2">
           <button className="text-[9px] font-black bg-white text-black px-3 py-1 rounded-full uppercase">Google Login</button>
-          <button onClick={() => { setIsMuted(!isMuted); if (!isMuted) window.speechSynthesis.cancel(); }} 
+          <button onClick={() => { setIsMuted(!isMuted); if (!isMuted) { window.speechSynthesis.cancel(); if(audioRef.current) audioRef.current.pause(); } }} 
             className={`px-4 py-1.5 rounded-full text-[9px] font-black border uppercase ${isMuted ? 'border-red-500 text-red-500 bg-red-500/10' : 'border-lime-500 text-lime-500 bg-lime-500/10'}`}>
             {isMuted ? '🔇 Muted' : '🔊 Sound On'}
           </button>
