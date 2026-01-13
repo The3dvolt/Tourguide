@@ -6,15 +6,17 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, voiceId, ssmlGender } = await req.json();
+    const { text, voiceId, ssmlGender, customKey } = await req.json();
     
     if (!text) {
       return NextResponse.json({ error: 'No text provided' }, { status: 400 });
     }
     
+    const apiKey = customKey || process.env.GOOGLE_AI_API_KEY;
+
     // Use Google Cloud Text-to-Speech (FREE tier: 0-4M chars/month)
     const response = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_AI_API_KEY}`,
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
       {
         method: 'POST',
         headers: {

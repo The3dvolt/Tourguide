@@ -140,7 +140,12 @@ export default function TourGuidePage() {
       const res = await fetch('/api/voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId: selectedVoice.voiceURI, ssmlGender: selectedVoice.gender })
+        body: JSON.stringify({ 
+          text, 
+          voiceId: selectedVoice.voiceURI, 
+          ssmlGender: selectedVoice.gender,
+          customKey: userApiKey 
+        })
       });
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
