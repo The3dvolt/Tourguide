@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import MiniMap from './components/MiniMap';
 
 // --- Math Helpers ---
 function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -190,6 +191,7 @@ export default function TourGuidePage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-black text-white p-4 max-w-lg mx-auto font-sans overflow-hidden">
+      <MiniMap />
       <header className="flex justify-between items-start mb-4">
         <div className="flex-1">
           <h1 className="font-black text-lime-500 text-xl italic uppercase tracking-tighter">3D VOLT TOUR</h1>
