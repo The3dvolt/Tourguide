@@ -24,7 +24,7 @@ export default function MiniMap() {
 
   if (!position) {
     return (
-      <div className="fixed top-4 right-4 w-[100px] h-[100px] z-50 border-2 border-white shadow-lg rounded-lg overflow-hidden bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+      <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] z-50 border-2 border-white shadow-lg rounded-lg overflow-hidden bg-gray-200 flex items-center justify-center text-xs text-gray-500 opacity-70">
         Locating...
       </div>
     );
@@ -35,7 +35,7 @@ export default function MiniMap() {
   const bbox = `${position.lng - delta},${position.lat - delta},${position.lng + delta},${position.lat + delta}`;
 
   return (
-    <div className="fixed top-4 right-4 w-[100px] h-[100px] z-50 border-2 border-white shadow-lg rounded-lg overflow-hidden bg-gray-200">
+    <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] z-50 border-2 border-white shadow-lg rounded-lg overflow-hidden bg-gray-200 opacity-70">
       <iframe
         title="User Location Mini Map"
         width="100%"
