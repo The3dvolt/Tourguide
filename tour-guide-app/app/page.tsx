@@ -19,11 +19,13 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   return Math.round(R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))));
 }
 
-const GEMINI_VOICES = [
+const AVAILABLE_VOICES = [
   { name: 'Journey (Female)', voiceURI: 'en-US-Journey-F', gender: 'FEMALE' },
   { name: 'Journey (Male)', voiceURI: 'en-US-Journey-D', gender: 'MALE' },
   { name: 'Standard (Female)', voiceURI: 'en-US-Standard-C', gender: 'FEMALE' },
   { name: 'Standard (Male)', voiceURI: 'en-US-Standard-D', gender: 'MALE' },
+  { name: 'Piper/VITS (Jenny)', voiceURI: 'Xenova/vits-ljs', gender: 'FEMALE' },
+  { name: 'Piper/VITS (MMS)', voiceURI: 'Xenova/mms-tts-eng', gender: 'FEMALE' },
 ];
 
 export default function TourGuidePage() {
@@ -54,9 +56,9 @@ export default function TourGuidePage() {
   // 🔊 Audio Setup
   useEffect(() => {
     if (!isMounted) return;
-    setVoices(GEMINI_VOICES);
+    setVoices(AVAILABLE_VOICES);
     if (!selectedVoiceURI) {
-      setSelectedVoiceURI(GEMINI_VOICES[0].voiceURI);
+      setSelectedVoiceURI(AVAILABLE_VOICES[0].voiceURI);
     }
   }, [isMounted]);
 
@@ -136,7 +138,7 @@ export default function TourGuidePage() {
     }
 
     try {
-      const selectedVoice = voices.find(v => v.voiceURI === selectedVoiceURI) || GEMINI_VOICES[0];
+      const selectedVoice = voices.find(v => v.voiceURI === selectedVoiceURI) || AVAILABLE_VOICES[0];
       const res = await fetch('/api/voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
