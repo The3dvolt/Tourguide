@@ -1,7 +1,7 @@
-/** @type {import('next').NextConfig} */
+** @type {import('next').NextConfig} */
 const nextConfig = {
-    // This prevents webpack from bundling the library, allowing it to load binaries correctly
-    serverExternalPackages: ['@xenova/transformers', 'wavefile'],
+    // This setting is required for @xenova/transformers to work on Vercel
+    serverExternalPackages: ['@xenova/transformers'],
 };
 
 export default nextConfig;
