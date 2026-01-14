@@ -2,38 +2,18 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase'; // Adjust path if necessary
+import TTSManager from '../lib/TTSManager';
 
 export default function TourGuide({ radius, setRadius, pois, locationContext, debugInfo }) {
-  const [voices, setVoices] = useState([]);
-  const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isNarrating, setIsNarrating] = useState(false);
   const [currentNarration, setCurrentNarration] = useState('');
   const audioRef = useRef(null);
-
-  // Load voices for Safari
-  const updateVoices = () => {
-    const v = window.speechSynthesis.getVoices();
-    if (v.length > 0) {
-      const en = v.filter(voice => voice.lang.startsWith('en'));
-      setVoices(en);
-      if (!selectedVoiceURI && en.length > 0) {
-        setSelectedVoiceURI(en[0].voiceURI);
-      }
-    }
-  };
-
-  useEffect(() => {
-    window.speechSynthesis.onvoiceschanged = updateVoices;
-    updateVoices();
-  }, []);
+  const ttsManager = TTSManager.getInstance();
 
   const handleStart = () => {
-    const msg = new SpeechSynthesisUtterance("Audio active");
-    msg.volume = 0;
-    window.speechSynthesis.speak(msg);
+    ttsManager.speak("Audio active");
     setIsUnlocked(true);
-    updateVoices();
   };
 
   const handleNarrate = async () => {
@@ -47,11 +27,7 @@ export default function TourGuide({ radius, setRadius, pois, locationContext, de
       });
       const data = await res.json();
       setCurrentNarration(data.text);
-
-      const utterance = new SpeechSynthesisUtterance(data.text);
-      const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
-      if (voice) utterance.voice = voice;
-      window.speechSynthesis.speak(utterance);
+      ttsManager.speak(data.text);
     } catch (e) {
       setCurrentNarration("Error connecting to Gemini.");
     } finally {
@@ -67,18 +43,6 @@ export default function TourGuide({ radius, setRadius, pois, locationContext, de
         </button>
       ) : (
         <>
-          {/* Voice Dropdown */}
-          <div className="bg-slate-900 p-4 rounded-3xl border border-white/10">
-            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-2">Select Guide Voice</label>
-            <select 
-              value={selectedVoiceURI} 
-              onChange={(e) => setSelectedVoiceURI(e.target.value)}
-              className="w-full bg-black text-white p-3 rounded-xl border-none font-bold text-sm"
-            >
-              {voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
-            </select>
-          </div>
-
           {/* Narration Box */}
           <section className={`p-6 rounded-[2.5rem] border-2 transition-all duration-700 ${isNarrating ? 'border-blue-500 bg-blue-500/5' : 'border-white/5 bg-slate-950'}`}>
             <p className="text-xl font-medium leading-relaxed text-slate-200">
