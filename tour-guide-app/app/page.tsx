@@ -22,6 +22,7 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
 const AVAILABLE_VOICES = [
   { name: 'Piper/VITS (Jenny)', voiceURI: 'Xenova/vits-ljs', gender: 'FEMALE' },
   { name: 'Piper/VITS (MMS)', voiceURI: 'Xenova/mms-tts-eng', gender: 'FEMALE' },
+  { name: 'HAL 9000', voiceURI: 'hal_quantized', gender: 'MALE' },
 ];
 
 export default function TourGuidePage() {
