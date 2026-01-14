@@ -20,10 +20,6 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
 }
 
 const AVAILABLE_VOICES = [
-  { name: 'Journey (Female)', voiceURI: 'en-US-Journey-F', gender: 'FEMALE' },
-  { name: 'Journey (Male)', voiceURI: 'en-US-Journey-D', gender: 'MALE' },
-  { name: 'Standard (Female)', voiceURI: 'en-US-Standard-C', gender: 'FEMALE' },
-  { name: 'Standard (Male)', voiceURI: 'en-US-Standard-D', gender: 'MALE' },
   { name: 'Piper/VITS (Jenny)', voiceURI: 'Xenova/vits-ljs', gender: 'FEMALE' },
   { name: 'Piper/VITS (MMS)', voiceURI: 'Xenova/mms-tts-eng', gender: 'FEMALE' },
 ];
